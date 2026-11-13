@@ -1,6 +1,7 @@
 # -*- coding: binary -*-
 
 require 'bindata'
+require 'rex/post/channel'
 
 module Rex::Proto::Http::WebSocket
   class WebSocketError < StandardError
@@ -43,8 +44,6 @@ module Rex::Proto::Http::WebSocket
       #   binary and text)
       # @param [Symbol] write_type the data type to write to the WebSocket
       def initialize(websocket, read_type: nil, write_type: :binary)
-        initialize_abstraction
-
         # a read type of nil will handle both binary and text frames that are received
         raise ArgumentError, 'read_type must be nil, :binary or :text' unless [nil, :binary, :text].include?(read_type)
         raise ArgumentError, 'write_type must be :binary or :text' unless %i[binary text].include?(write_type)
@@ -56,7 +55,7 @@ module Rex::Proto::Http::WebSocket
 
         # beware of: https://github.com/rapid7/rex-socket/issues/32
         _, localhost, localport = websocket.getlocalname
-        _, peerhost, peerport = Socket.from_sockaddr(websocket.getpeername)
+        _, peerhost, peerport = Rex::Socket.from_sockaddr(websocket.getpeername)
         @params = Rex::Socket::Parameters.from_hash({
           'LocalHost' => localhost,
           'LocalPort' => localport,
@@ -64,6 +63,10 @@ module Rex::Proto::Http::WebSocket
           'PeerPort' => peerport,
           'SSL' => websocket.respond_to?(:sslctx) && !websocket.sslctx.nil?
         })
+
+        initialize_abstraction
+
+        lsock.initinfo(Rex::Socket.to_authority(peerhost, peerport), Rex::Socket.to_authority(localhost, localport))
 
         @thread = Rex::ThreadFactory.spawn("WebSocketChannel(#{localhost}->#{peerhost})", false) do
           websocket.wsloop do |data, data_type|
@@ -142,8 +145,8 @@ module Rex::Proto::Http::WebSocket
       # This provides a hook point that is called when data is read from the WebSocket peer. Subclasses can intercept and
       # process the data. The default functionality does nothing.
       #
-      # @param [String] data the data that was read
-      # @param [Symbol] data_type the type of data that was received, either :binary or :text
+      # @param data [String] the data that was read
+      # @param _data_type [Symbol] the type of data that was received, either :binary or :text
       # @return [String, nil] if a string is returned, it's passed through the channel
       def on_data_read(data, _data_type)
         data
@@ -187,7 +190,7 @@ module Rex::Proto::Http::WebSocket
     #
     # Read a WebSocket::Frame from the peer.
     #
-    # @return [WebSocket::Frame] the frame that was received from the peer.
+    # @return [Nil, WebSocket::Frame] the frame that was received from the peer.
     def get_wsframe(_opts = {})
       frame = Frame.new
       frame.header.read(self)
@@ -231,7 +234,8 @@ module Rex::Proto::Http::WebSocket
       frame.mask!
       put_wsframe(frame, opts = opts)
       while (frame = get_wsframe(opts))
-        break if frame.opcode == Opcode::CONNECTION_CLOSE
+        break if frame.nil?
+        break if frame.header.opcode == Opcode::CONNECTION_CLOSE
         # all other frames are dropped after our connection close request is sent
       end
 

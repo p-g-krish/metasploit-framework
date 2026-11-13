@@ -7,7 +7,6 @@ class MetasploitModule < Msf::Auxiliary
   include Msf::Auxiliary::Report
   include Msf::Exploit::Remote::HTTP::Wordpress
   include Msf::Auxiliary::Scanner
-  require 'metasploit/framework/hashes/identify'
 
   def initialize(info = {})
     super(
@@ -22,6 +21,7 @@ class MetasploitModule < Msf::Auxiliary
           files will be parsed looking for the wp_users INSERT statement to grab user creds.
         },
         'References' => [
+          ['CVE', '2020-36848'],
           ['EDB', '49252'],
           ['WPVDB', '10502'],
           ['WPVDB', '10503'],
@@ -154,7 +154,7 @@ class MetasploitModule < Msf::Auxiliary
               module_fullname: fullname,
               username: username,
               private_type: :nonreplayable_hash,
-              jtr_format: identify_hash(hash),
+              jtr_format: Metasploit::Framework::Hashes.identify_hash(hash),
               private_data: hash,
               service_name: 'Wordpress',
               address: ip,

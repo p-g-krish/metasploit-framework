@@ -9,6 +9,7 @@ require 'module_test'
 class MetasploitModule < Msf::Post
 
   include Msf::ModuleTest::PostTest
+  include Msf::ModuleTest::PostTestFileSystem
   include Msf::Post::Common
   include Msf::Post::File
 
@@ -19,16 +20,10 @@ class MetasploitModule < Msf::Post
         'Name' => 'Testing Remote File Manipulation',
         'Description' => %q{ This module will test Post::File API methods },
         'License' => MSF_LICENSE,
-        'Author' => [ 'egypt'],
-        'Platform' => [ 'windows', 'linux', 'java' ],
-        'SessionTypes' => [ 'meterpreter', 'shell' ]
+        'Author' => [ 'egypt' ],
+        'Platform' => [ 'windows', 'linux', 'unix', 'java', 'osx' ],
+        'SessionTypes' => [ 'meterpreter', 'shell', 'powershell' ]
       )
-    )
-
-    register_options(
-      [
-        OptString.new('BaseFileName', [true, 'File name to create', 'meterpreter-test'])
-      ], self.class
     )
   end
 
@@ -38,12 +33,97 @@ class MetasploitModule < Msf::Post
   # The +cleanup+ method will change it back
   #
   def setup
-    @old_pwd = pwd
-    tmp = directory?('/tmp') ? '/tmp' : '%TEMP%'
-    vprint_status("Setup: changing working directory to #{tmp}")
-    cd(tmp)
-
+    push_test_directory
     super
+  end
+
+  def cleanup
+    pop_test_directory
+    super
+  end
+
+  def test_dir
+    fs_sep = session.platform == 'windows' ? '\\' : '/'
+
+    it 'should test for directory existence' do
+      ret = false
+      [
+        'c:\\',
+        '/etc/',
+        '/tmp'
+      ].each do |path|
+        ret = true if directory?(path)
+      end
+
+      ret
+    end
+
+    it 'should create directories' do
+      mkdir(datastore['BaseDirectoryName'])
+      ret = directory?(datastore['BaseDirectoryName'])
+      ret &&= write_file([datastore['BaseDirectoryName'], 'file'].join(fs_sep), '')
+      ret &&= mkdir([datastore['BaseDirectoryName'], 'directory'].join(fs_sep))
+      ret &&= write_file([datastore['BaseDirectoryName'], 'directory', 'file'].join(fs_sep), '')
+      ret
+    end
+
+    it 'should create intermediary directories' do
+      nested_path = [datastore['BaseDirectoryName'], 'parent', 'child'].join(fs_sep)
+      mkdir(nested_path)
+
+      directory?(nested_path)
+    end
+
+    it 'should list the directory we just made' do
+      dents = dir(datastore['BaseDirectoryName'])
+      dents.include?('file') && dents.include?('directory')
+    end
+
+    it 'should recursively delete the directory we just made' do
+      rm_rf(datastore['BaseDirectoryName'])
+      !directory?(datastore['BaseDirectoryName'])
+    end
+
+    if (session.platform == 'windows') || (session.platform != 'windows' && command_exists?('ln'))
+      it 'should delete a symbolic link target' do
+        # TODO: Fix this functionality
+        if session.platform.eql?('windows') && session.type.eql?('shell')
+          vprint_status('test skipped for Windows CMD - functionality not correct')
+          next true
+        end
+        mkdir(datastore['BaseDirectoryName'])
+        ret = directory?(datastore['BaseDirectoryName'])
+        link = "#{datastore['BaseDirectoryName']}.lnk"
+        ret &&= write_file([datastore['BaseDirectoryName'], 'file'].join(fs_sep), '')
+        make_symlink(datastore['BaseDirectoryName'], link)
+        unless exists?(link)
+          print_error('failed to create the symbolic link')
+        end
+        rm_rf(link)
+        # the link should have been deleted
+        ret &&= !exists?(link)
+        # but the target directory and its contents should still be intact
+        ret &&= exists?("#{[datastore['BaseDirectoryName'], 'file'].join(fs_sep)}")
+        rm_rf(datastore['BaseDirectoryName'])
+        ret
+      end
+
+      it 'should not recurse into symbolic link directories' do
+        mkdir(datastore['BaseDirectoryName'] + '.1')
+        mkdir(datastore['BaseDirectoryName'] + '.2')
+        ret = directory?(datastore['BaseDirectoryName'] + '.1') && directory?(datastore['BaseDirectoryName'] + '.2')
+        ret &&= write_file([datastore['BaseDirectoryName'] + '.1', 'file'].join(fs_sep), '')
+        # make a symlink in dir.2 to dir.1 to ensure the deletion does not recurse into dir.1
+        make_symlink("#{datastore['BaseDirectoryName']}.1", "#{datastore['BaseDirectoryName']}.2/link")
+        rm_rf("#{datastore['BaseDirectoryName']}.2")
+        # check that dir.1's contests are still intact
+        ret &&= exists?([datastore['BaseDirectoryName'] + '.1', 'file'].join(fs_sep))
+        rm_rf("#{datastore['BaseDirectoryName']}.1")
+        ret
+      end
+    else
+      print_warning('skipping link related checks because the target is incompatible')
+    end
   end
 
   def test_file
@@ -55,22 +135,10 @@ class MetasploitModule < Msf::Post
         '/etc/passwd',
         '/etc/master.passwd',
         '%WINDIR%\\system32\\notepad.exe',
-        '%WINDIR%\\system32\\calc.exe'
+        '%WINDIR%\\system32\\calc.exe',
+        File.expand_path(__FILE__)
       ].each do |path|
         ret = true if file?(path)
-      end
-
-      ret
-    end
-
-    it 'should test for directory existence' do
-      ret = false
-      [
-        'c:\\',
-        '/etc/',
-        '/tmp'
-      ].each do |path|
-        ret = true if directory?(path)
       end
 
       ret
@@ -87,7 +155,7 @@ class MetasploitModule < Msf::Post
       f = read_file(datastore['BaseFileName'])
       ret = (f == 'foo')
       unless ret
-        print_error("Didn't read what we wrote, actual file on target: |#{f}|")
+        vprint_status("Didn't read what we wrote, actual file on target: |#{f.inspect}| - #{f.bytes.inspect}")
       end
 
       ret
@@ -102,7 +170,7 @@ class MetasploitModule < Msf::Post
       final_contents = read_file(datastore['BaseFileName'])
       ret &&= final_contents == 'foobarbaz'
       unless ret
-        print_error("Didn't read what we wrote, actual file on target: #{final_contents}")
+        vprint_status("Didn't read what we wrote, actual file on target: |#{final_contents.inspect}| - #{final_contents.bytes.inspect}")
       end
 
       ret
@@ -118,7 +186,7 @@ class MetasploitModule < Msf::Post
       # Make sure we don't have leftovers from a previous run
       moved_file = datastore['BaseFileName'] + '-moved'
       begin
-        rm _f(datastore['BaseFileName'])
+        rm_f(datastore['BaseFileName'])
       rescue StandardError
         nil
       end
@@ -132,8 +200,8 @@ class MetasploitModule < Msf::Post
       write_file(datastore['BaseFileName'], '')
 
       rename_file(datastore['BaseFileName'], moved_file)
-      res &&= exist?(moved_file)
-      res &&= !exist?(datastore['BaseFileName'])
+      ret = exist?(moved_file)
+      ret &&= !exist?(datastore['BaseFileName'])
 
       # clean up
       begin
@@ -146,13 +214,16 @@ class MetasploitModule < Msf::Post
       rescue StandardError
         nil
       end
+
+      ret
     end
   end
 
   def test_binary_files
     # binary_data = ::File.read("/bin/ls")
-    binary_data = ::File.read('/bin/echo')
+    # binary_data = ::File.read('/bin/echo')
     # binary_data = "\xff\x00\xff\xfe\xff\`$(echo blha)\`"
+    binary_data = ((0..255).to_a * 500).shuffle.pack('c*')
     it 'should write binary data' do
       vprint_status "Writing #{binary_data.length} bytes"
       t = Time.now
@@ -165,7 +236,7 @@ class MetasploitModule < Msf::Post
 
     it 'should read the binary data we just wrote' do
       bin = read_file(datastore['BaseFileName'])
-      vprint_status "Read #{bin.length} bytes"
+      vprint_status "Read #{bin.length} bytes" if bin
 
       bin == binary_data
     end
@@ -182,37 +253,42 @@ class MetasploitModule < Msf::Post
       bin = read_file(datastore['BaseFileName'])
       rm_f(datastore['BaseFileName'])
 
-      bin == "\xde\xad\xbe\xef"
+      test_string = "\xde\xad\xbe\xef"
+
+      vprint_status "expected: #{test_string.bytes} - #{test_string.encoding}"
+      vprint_status "actual: #{bin.bytes} - #{bin.encoding}"
+
+      bin == test_string
     end
   end
 
   def test_path_expansion_nix
     unless session.platform =~ /win/i
-      it "should expand home" do
+      it 'should expand home' do
         home1 = expand_path('~')
         home2 = expand_path('$HOME')
         home1 == home2 && home1.length > 0
       end
 
-      it "non-isolated tilde should not expand" do
+      it 'should not expand non-isolated tilde' do
         s = '~a'
         result = expand_path(s)
         s == result
       end
 
-      it "mid-string tilde should not expand" do
+      it 'should not expand mid-string tilde' do
         s = '/home/~'
         result = expand_path(s)
         s == result
       end
 
-      it "env vars with invalid naming should not expand" do
+      it 'should not expand env vars with invalid naming' do
         s = 'no environment $ variables /here'
         result = expand_path(s)
         s == result
       end
 
-      it "should expand multiple variables" do
+      it 'should expand multiple variables' do
         result = expand_path('/blah/$HOME/test/$USER')
         home = expand_path('$HOME')
         user = expand_path('$USER')
@@ -222,10 +298,33 @@ class MetasploitModule < Msf::Post
     end
   end
 
-  def cleanup
-    vprint_status("Cleanup: changing working directory back to #{@old_pwd}")
-    cd(@old_pwd)
-    super
+  def test_writable
+    if session.platform == 'windows'
+      it 'should detect a writable file' do
+        write_file(datastore['BaseFileName'], 'test')
+        ret = writable?(datastore['BaseFileName'])
+        rm_f(datastore['BaseFileName'])
+        ret
+      end
+
+      it 'should detect a writable directory' do
+        mkdir(datastore['BaseDirectoryName'])
+        ret = writable?(datastore['BaseDirectoryName'])
+        rm_rf(datastore['BaseDirectoryName'])
+        ret
+      end
+
+    end
   end
+
+  def make_symlink(target, symlink)
+    if session.platform == 'windows'
+      cmd_exec('cmd.exe', "/c mklink #{directory?(target) ? '/D ' : ''}#{symlink} #{target}")
+    else
+      cmd_exec("ln -s $(pwd)/#{target} $(pwd)/#{symlink}")
+    end
+  end
+
+  def register_dir_for_cleanup(path); end
 
 end

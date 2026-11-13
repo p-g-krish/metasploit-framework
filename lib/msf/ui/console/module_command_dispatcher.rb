@@ -134,7 +134,11 @@ module ModuleCommandDispatcher
   #
   # Checks to see if a target is vulnerable.
   #
-  def cmd_check(*args)
+  def cmd_check(*args, opts: {})
+    if (args.include?('-r') || args.include?('--reload-libs')) && !opts[:previously_reloaded]
+      driver.run_single('reload_lib -a')
+    end
+
     return false unless (args = parse_check_opts(args))
 
     mod_with_opts = mod.replicant
@@ -170,14 +174,40 @@ module ModuleCommandDispatcher
     print_line
   end
 
-  def report_vuln(instance)
-    framework.db.report_vuln(
+  def report_vuln(instance, checkcode = nil)
+    opts = {
       workspace: instance.workspace,
-      host: instance.rhost,
+      host: instance.respond_to?(:target_host) && instance.target_host ? instance.target_host : instance.datastore['RHOST'],
+      proto: if instance.class.ancestors.include?(Msf::Exploit::Remote::Udp)
+               'udp'
+             else
+               'tcp'
+             end,
       name: instance.name,
-      info: "This was flagged as vulnerable by the explicit check of #{instance.fullname}.",
+      info: if checkcode == Msf::Exploit::CheckCode::Appears
+              "Target appears vulnerable based on the explicit check of #{instance.fullname}."
+            else
+              "Vulnerability confirmed by the explicit check of #{instance.fullname}."
+            end,
       refs: instance.references
-    )
+    }
+
+    # Include port so that checks against different ports on the same host
+    # create distinct vuln records instead of collapsing into one.
+    if instance.datastore['RPORT']
+      rport = instance.respond_to?(:rport) ? instance.rport : instance.datastore['RPORT']
+      opts[:port] = rport.to_i if rport.to_i > 0
+    end
+
+    if checkcode&.kind_of?(Msf::Exploit::CheckCode) && checkcode.vuln.present?
+      if checkcode.vuln.kind_of?(Array)
+        checkcode.vuln.each { |vuln| framework.db.report_vuln(opts.merge(vuln)) }
+      else
+        framework.db.report_vuln(opts.merge(checkcode.vuln))
+      end
+    else
+      framework.db.report_vuln(opts)
+    end
   end
 
   def check_simple(instance=nil)
@@ -196,21 +226,21 @@ module ModuleCommandDispatcher
 
     begin
       if instance.respond_to?(:check_simple)
-        code = instance.check_simple(
+        code = instance.check_simple({
           'LocalInput'  => driver.input,
           'LocalOutput' => driver.output
-        )
+        })
       else
         msg = "Check failed: #{instance.type.capitalize} modules do not support check."
         raise NotImplementedError, msg
       end
 
       if (code && code.kind_of?(Msf::Exploit::CheckCode))
-        if (code == Msf::Exploit::CheckCode::Vulnerable)
+        if code == Msf::Exploit::CheckCode::Vulnerable || code == Msf::Exploit::CheckCode::Appears
           print_good("#{peer_msg}#{code[1]}")
           # Restore RHOST for report_vuln
           instance.datastore['RHOST'] ||= rhost
-          report_vuln(instance)
+          report_vuln(instance, code)
         else
           print_status("#{peer_msg}#{code[1]}")
         end
@@ -243,6 +273,12 @@ module ModuleCommandDispatcher
   # Reloads the active module
   #
   def cmd_reload(*args)
+    if args.include?('-r') || args.include?('--reload-libs')
+      driver.run_single('reload_lib -a')
+    end
+
+    return cmd_reload_help if args.include?('-h') || args.include?('--help')
+
     begin
       reload
     rescue

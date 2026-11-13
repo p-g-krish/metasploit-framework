@@ -27,7 +27,12 @@ class MetasploitModule < Msf::Auxiliary
           [ 'URL', 'https://gist.github.com/red0xff/c4511d2f427efcb8b018534704e9607a' ]
         ],
         'Targets' => [['Wildcard Target', {}]],
-        'DefaultTarget' => 0
+        'DefaultTarget' => 0,
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [IOC_IN_LOGS],
+          'Reliability' => []
+        }
       )
     )
     register_options(
@@ -200,9 +205,9 @@ class MetasploitModule < Msf::Auxiliary
       res.get_cookies.empty? # no Set-Cookie header means the session cookie is valid
     end
     if @sqli.test_vulnerable
-      Exploit::CheckCode::Vulnerable
+      Exploit::CheckCode::Vulnerable('SQL injection in bauth cookie confirmed')
     else
-      Exploit::CheckCode::Safe
+      Exploit::CheckCode::Safe('SQL injection test did not succeed')
     end
   end
 

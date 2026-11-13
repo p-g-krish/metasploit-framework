@@ -1,44 +1,39 @@
-
 require 'rex/post/meterpreter/extensions/stdapi/command_ids'
 require 'rex'
 
 lib = File.join(Msf::Config.install_root, "test", "lib")
-$:.push(lib) unless $:.include?(lib)
+$LOAD_PATH.push(lib) unless $LOAD_PATH.include?(lib)
 require 'module_test'
 
 class MetasploitModule < Msf::Post
 
   include Msf::ModuleTest::PostTest
+  include Msf::ModuleTest::PostTestFileSystem
 
-  def initialize(info={})
-    super( update_info( info,
-        'Name'          => 'Testing Meterpreter Search',
-        'Description'   => %q{ This module will test the meterpreter search method },
-        'License'       => MSF_LICENSE,
-        'Author'        => [ 'timwr'],
-        'Platform'      => [ 'windows', 'linux', 'java' ],
-        'SessionTypes'  => [ 'meterpreter' ]
-      ))
-    register_options(
-      [
-        OptBool.new("AddEntropy" , [false, "Add entropy token to file and directory names.", false]),
-        OptString.new("BaseFileName" , [true, "File/dir base name", "meterpreter-test"])
-      ], self.class)
+  def initialize(info = {})
+    super(
+      update_info(
+        info,
+        'Name' => 'Testing Meterpreter Search',
+        'Description' => %q{ This module will test the meterpreter search method },
+        'License' => MSF_LICENSE,
+        'Author' => [ 'timwr'],
+        'Platform' => [ 'windows', 'linux', 'java', 'osx' ],
+        'SessionTypes' => [ 'meterpreter' ]
+      )
+    )
   end
 
+  #
+  # Change directory into a place that we have write access.
+  #
+  # The +cleanup+ method will change it back
+  #
   def setup
-    @old_pwd = session.fs.dir.getwd
-    stat = session.fs.file.stat("/tmp") rescue nil
-    if (stat and stat.directory?)
-      tmp = "/tmp"
-    else
-      tmp = session.sys.config.getenv('TEMP')
-    end
-    vprint_status("Setup: changing working directory to #{tmp}")
-    session.fs.dir.chdir(tmp)
+    push_test_directory
 
     if datastore["AddEntropy"]
-      entropy_value = '-' + ('a'..'z').to_a.shuffle[0,8].join
+      entropy_value = '-' + ('a'..'z').to_a.shuffle[0, 8].join
     else
       entropy_value = ""
     end
@@ -49,6 +44,12 @@ class MetasploitModule < Msf::Post
     session.fs.file.rm(@file_name) rescue nil
     fd = session.fs.file.open(@file_name, "wb")
     fd.close
+    super
+  end
+
+  def cleanup
+    pop_test_directory
+    session.fs.file.rm(@file_name) rescue nil
     super
   end
 
@@ -154,11 +155,15 @@ class MetasploitModule < Msf::Post
       res
     end
 
-    genesis_date = "3 January 2009 18:15:13 +0000"
-    genesis = DateTime.parse(genesis_date).to_i
+    genesis_str = "3 January 2009 18:15:13 +0000"
+    genesis_date = DateTime.parse(genesis_str)
+    genesis = genesis_date.to_i
 
-    if not ['windows', 'win'].include? session.platform
-      cmd_exec("touch -d '#{genesis_date}' #{@file_name}")
+    if session.platform == 'osx'
+      osx_genesis_str = genesis_date.strftime("%Y%m%d%H%M.%S")
+      cmd_exec("touch -t '#{osx_genesis_str}' #{@file_name}")
+    elsif !['windows', 'win'].include?(session.platform)
+      cmd_exec("touch -d '#{genesis_str}' #{@file_name}")
     elsif session.priv.present?
       client.priv.fs.set_file_mace(@file_name, genesis)
     else
@@ -176,13 +181,6 @@ class MetasploitModule < Msf::Post
       end
       res
     end
-  end
-
-  def cleanup
-    session.fs.file.rm(@file_name) rescue nil
-    vprint_status("Cleanup: changing working directory back to #{@old_pwd}")
-    session.fs.dir.chdir(@old_pwd)
-    super
   end
 
 end

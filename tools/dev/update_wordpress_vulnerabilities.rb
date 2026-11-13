@@ -2,9 +2,6 @@
 # -*- coding: binary -*-
 
 #
-# Update modules/auxiliary/scanner/http/wordpress_scanner.rb to have the most
-# up to date list of vuln compontents based on exploits/scanners in the framework
-#
 # by h00die
 #
 
@@ -12,7 +9,9 @@ require 'optparse'
 
 options = {}
 optparse = OptionParser.new do |opts|
-  opts.banner = 'Usage: update_wordpress_vulnerabilities.rb [options]'
+  opts.banner = 'Usage: ruby tools/dev/update_wordpress_vulnerabilities.rb [options]'
+  opts.separator "This program updates data/wordlists/wp-exploitable-themes.txt and wp-exploitable-plugins.txt which are used by modules/auxiliary/scanner/http/wordpress_scanner.rb to have the most up-to-date list of vuln components"
+  opts.separator ""
   opts.on('-h', '--help', 'Display this screen.') do
     puts opts
     exit
@@ -74,7 +73,7 @@ path = File.expand_path('../../', File.dirname(__FILE__))
 Dir.glob(path + '/modules/**/*.rb').each do |file|
   next unless file.include?('exploits') || file.include?('auxiliary')
 
-  str = IO.read(file)
+  str = File.read(file)
   match = str.match(/check_plugin_version_from_readme\(['"]([^'"]+)['"]/)
   unless match.nil?
     plugins.append(match[1])
@@ -85,18 +84,23 @@ Dir.glob(path + '/modules/**/*.rb').each do |file|
     themes.append(match[1])
     info("#{file} contains theme '#{match[1]}'")
   end
+  match = str.match(/check_theme_version_from_style\(['"]([^'"]+)['"]/)
+  unless match.nil?
+    themes.append(match[1])
+    info("#{file} contains theme '#{match[1]}'")
+  end
 end
 
 info('Updating wp-exploitable-themes.txt')
 wp_list = path + '/data/wordlists/wp-exploitable-themes.txt'
 
 File.open(wp_list, 'w+') do |f|
-  f.puts(themes)
+  f.puts(themes.sort)
 end
 
 info('Updating wp-exploitable-plugins.txt')
 wp_list = path + '/data/wordlists/wp-exploitable-plugins.txt'
 
 File.open(wp_list, 'w+') do |f|
-  f.puts(plugins)
+  f.puts(plugins.sort)
 end

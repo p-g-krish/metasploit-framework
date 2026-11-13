@@ -42,6 +42,11 @@ class MetasploitModule < Msf::Post
         'References' => [
           ['URL', 'http://social.technet.microsoft.com/wiki/contents/articles/5392.active-directory-ldap-syntax-filters.aspx'],
         ],
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [],
+          'Reliability' => []
+        },
         'Compat' => {
           'Meterpreter' => {
             'Commands' => %w[
@@ -61,7 +66,7 @@ class MetasploitModule < Msf::Post
   end
 
   def run
-    fields = datastore['FIELDS'].gsub(/\s+/, "").split(',')
+    fields = datastore['FIELDS'].gsub(/\s+/, '').split(',')
     search_filter = datastore['FILTER']
     max_search = datastore['MAX_SEARCH']
 
@@ -72,11 +77,11 @@ class MetasploitModule < Msf::Post
       return
     end
 
-    return if q.nil? or q[:results].empty?
+    return if q.nil? || q[:results].empty?
 
     # Results table holds raw string data
     results_table = Rex::Text::Table.new(
-      'Header' => "Domain Computers",
+      'Header' => 'Domain Computers',
       'Indent' => 1,
       'SortIndex' => -1,
       'Columns' => fields
@@ -91,7 +96,7 @@ class MetasploitModule < Msf::Post
 
       report = {}
       0.upto(fields.length - 1) do |i|
-        field = result[i][:value] || ""
+        field = result[i][:value] || ''
 
         # Only perform these actions if the database is connected and we want
         # to store in the DB.
@@ -108,7 +113,7 @@ class MetasploitModule < Msf::Post
               # TODO: Find another way to mark a host as being a domain controller
               #       The 'purpose' field should be server, client, device, printer, etc
               # report[:purpose] = "DC"
-              report[:purpose] = "server"
+              report[:purpose] = 'server'
             end
           when 'operatingSystemServicePack'
             # XXX: Does this take into account the leading 'SP' string?
@@ -117,7 +122,7 @@ class MetasploitModule < Msf::Post
               report[:os_sp] = 'SP' + field
             end
             if field =~ /(Service Pack|SP)\s?(\d+)/
-              report[:os_sp] = 'SP' + $2
+              report[:os_sp] = 'SP' + ::Regexp.last_match(2)
             end
 
           when 'description'
@@ -133,17 +138,17 @@ class MetasploitModule < Msf::Post
     end
 
     if db && datastore['STORE_DB']
-      print_status("Resolving IP addresses...")
+      print_status('Resolving IP addresses...')
       ip_results = client.net.resolve.resolve_hosts(hostnames, AF_INET)
 
       # Merge resolved array with reports
       reports.each do |report|
         ip_results.each do |ip_result|
-          if ip_result[:hostname] == report[:name]
-            report[:host] = ip_result[:ip]
-            vprint_good("Database report: #{report.inspect}")
-            report_host(report)
-          end
+          next unless ip_result[:hostname] == report[:name]
+
+          report[:host] = ip_result[:ip]
+          vprint_good("Database report: #{report.inspect}")
+          report_host(report)
         end
       end
     end

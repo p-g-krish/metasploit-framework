@@ -18,7 +18,7 @@ class MetasploitModule < Msf::Post
         'License' => MSF_LICENSE,
         'Author' => [ 'sinn3r'],
         'Platform' => [ 'win'],
-        'SessionTypes' => [ "meterpreter" ],
+        'SessionTypes' => [ 'meterpreter' ],
         'Actions' => [
           [ 'LIST', { 'Description' => 'Show a list of webcams' } ],
           [ 'SNAPSHOT', { 'Description' => 'Take a snapshot with the webcam' } ]
@@ -30,6 +30,11 @@ class MetasploitModule < Msf::Post
               stdapi_webcam_*
             ]
           }
+        },
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [PHYSICAL_EFFECTS],
+          'Reliability' => []
         }
       )
     )
@@ -48,14 +53,14 @@ class MetasploitModule < Msf::Post
       return
     end
 
-    if not action
-      print_error("Invalid action")
+    if !action
+      print_error('Invalid action')
       return
     end
 
     case action.name
     when /^list$/i
-      list_webcams(true)
+      list_webcams(show: true)
     when /^snapshot$/i
       snapshot
     end
@@ -73,8 +78,8 @@ class MetasploitModule < Msf::Post
       return
     end
 
-    if not webcams[datastore['INDEX'] - 1]
-      print_error("#{rhost} - No such index: #{datastore['INDEX'].to_s}")
+    if !(webcams[datastore['INDEX'] - 1])
+      print_error("#{rhost} - No such index: #{datastore['INDEX']}")
       return
     end
 
@@ -108,7 +113,7 @@ class MetasploitModule < Msf::Post
     end
   end
 
-  def list_webcams(show = false)
+  def list_webcams(show: false)
     begin
       webcams = client.webcam.webcam_list
     rescue Rex::Post::Meterpreter::RequestError

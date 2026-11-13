@@ -2,6 +2,7 @@
 
 require 'addressable'
 require 'msf/ui/console/command_dispatcher'
+require 'msf/ui/console/module_option_validation'
 
 module Msf
 module Ui
@@ -14,34 +15,36 @@ module Console
 #
 ###
 module ModuleArgumentParsing
+  include Msf::Ui::Console::ModuleOptionValidation
 
   # Options which are standard and predictable across all modules
   @@module_opts = Rex::Parser::Arguments.new(
-    '-h' => [ false, 'Help banner.'                                          ],
-    '-j' => [ false, 'Run in the context of a job.'                          ],
-    '-J' => [ false, 'Force running in the foreground, even if passive.'     ],
-    '-o' => [ true,  'A comma separated list of options in VAR=VAL format.'  ],
-    '-q' => [ false, 'Run the module in quiet mode with no output'           ]
+    ['-h', '--help']        => [ false, 'Help banner.'                                                       ],
+    ['-j', '--job']         => [ false, 'Run in the context of a job.'                                       ],
+    ['-J', '--foreground']  => [ false, 'Force running in the foreground, even if passive.'                  ],
+    ['-o', '--options']     => [ true,  'A comma separated list of options in VAR=VAL format.', '<options>'  ],
+    ['-q', '--quiet']       => [ false, 'Run the module in quiet mode with no output'                        ],
+    ['-r', '--reload-libs'] => [ false, 'Reload all libraries before running.'                               ]
   )
 
   @@module_opts_with_action_support = @@module_opts.merge(
-    '-a' => [ true, 'The action to use. If none is specified, ACTION is used.']
+    ['-a', '--action'] => [ true, 'The action to use. If none is specified, ACTION is used.', '<action>']
   )
 
   @@exploit_opts = @@module_opts.merge(
-    '-e' => [ true,  'The payload encoder to use.  If none is specified, ENCODER is used.' ],
-    '-f' => [ false, 'Force the exploit to run regardless of the value of MinimumRank.'    ],
-    '-n' => [ true,  'The NOP generator to use.  If none is specified, NOP is used.'       ],
-    '-p' => [ true,  'The payload to use.  If none is specified, PAYLOAD is used.'         ],
-    '-t' => [ true,  'The target index to use.  If none is specified, TARGET is used.'     ],
-    '-z' => [ false, 'Do not interact with the session after successful exploitation.'     ]
+    ['-e', '--encoder']       => [ true,  'The payload encoder to use.  If none is specified, ENCODER is used.', '<encoder>'   ],
+    ['-f', '--force-run']     => [ false, 'Force the exploit to run regardless of the value of MinimumRank.'                   ],
+    ['-n', '--nop-generator'] => [ true,  'The NOP generator to use.  If none is specified, NOP is used.', '<generator>'       ],
+    ['-p', '--payload']       => [ true,  'The payload to use.  If none is specified, PAYLOAD is used.', '<payload>'           ],
+    ['-t', '--target']        => [ true,  'The target index to use.  If none is specified, TARGET is used.', '<target>'        ],
+    ['-z', '--no-interact']   => [ false, 'Do not interact with the session after successful exploitation.'                    ]
   )
 
   def parse_check_opts(args)
     help_cmd = proc do |_result|
       cmd_check_help
     end
-    parse_opts(@@module_opts_with_action_support, args, help_cmd: help_cmd)&.slice(:datastore_options)
+    parse_opts(@@module_opts_with_action_support, args, help_cmd: help_cmd)&.slice(:datastore_options, :reload_libs)
   end
 
   def parse_run_opts(args, action: nil)
@@ -60,7 +63,7 @@ module ModuleArgumentParsing
     help_cmd = proc do |_result|
       cmd_exploit_help
     end
-    parse_opts(@@exploit_opts, args, help_cmd: help_cmd)&.except(:action)
+    parse_opts(@@exploit_opts, args, help_cmd: help_cmd)
   end
 
   def print_module_run_or_check_usage(command:, description: nil, options: @@module_opts)
@@ -88,7 +91,7 @@ module ModuleArgumentParsing
     print_line("    #{command} smb://user:pass@192.168.1.123") if is_smb_mod
     print_line("    #{command} LPATH=/tmp/foo.txt smb://user:pass@192.168.1.123/share_name/foo.txt") if is_smb_mod && mod.options.include?('RPATH')
     print_line('')
-    print_line('Learn more at https://github.com/rapid7/metasploit-framework/wiki/Using-Metasploit')
+    print_line('Learn more at https://docs.metasploit.com/docs/using-metasploit/basics/using-metasploit.html')
     print_line('')
   end
 
@@ -123,10 +126,13 @@ module ModuleArgumentParsing
         val << '=' unless val.include?('=')
         val.split(',').each do |opt|
           name, value = opt.split('=', 2)
+          warn_unknown_datastore_option(name) if mod
           append_datastore_option(datastore_options, name, value)
         end
       when '-p'
         result[:payload] = val
+      when '-r'
+        result[:reload_libs] = true
       when '-t'
         result[:target] = val.to_i
       when '-z'
@@ -146,7 +152,12 @@ module ModuleArgumentParsing
 
         if resembles_datastore_assignment?(val)
           name, val = val.split('=', 2)
-          append_datastore_option(datastore_options, name, val)
+          if name.upcase == 'ACTION'
+            result[:action] = val
+          else
+            warn_unknown_datastore_option(name) if mod
+            append_datastore_option(datastore_options, name, val)
+          end
         elsif resembles_rhost_value?(val)
           append_datastore_option(datastore_options, 'RHOSTS', val)
         else
@@ -163,7 +174,7 @@ module ModuleArgumentParsing
   def resembles_datastore_assignment?(val)
     return false unless val
 
-    valid_option_regex = /^\w+=.*/
+    valid_option_regex = /^(\w|::)+=.*/
     valid_option_regex.match?(val)
   end
 
@@ -188,6 +199,11 @@ module ModuleArgumentParsing
       datastore_options[name.upcase] = value
     end
     datastore_options
+  end
+
+  def warn_unknown_datastore_option(name)
+    message = unknown_datastore_option_message(mod, name)
+    print_warning(message) if message
   end
 
   # Wraps values which contain spaces in quotes to ensure it's handled correctly later

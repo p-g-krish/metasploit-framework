@@ -35,6 +35,11 @@ class MetasploitModule < Msf::Post
               stdapi_railgun_api
             ]
           }
+        },
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [],
+          'Reliability' => []
         }
       )
     )
@@ -52,9 +57,9 @@ class MetasploitModule < Msf::Post
   end
 
   def icmp_setup
-    handler = client.railgun.ws2_32.socket("AF_INET", "SOCK_RAW", "IPPROTO_ICMP")
+    handler = client.railgun.ws2_32.socket('AF_INET', 'SOCK_RAW', 'IPPROTO_ICMP')
     if handler['GetLastError'] == 0
-      vprint_good("ICMP raw socket created successfully")
+      vprint_good('ICMP raw socket created successfully')
     else
       print_error("There was an error setting the ICMP raw socket; GetLastError: #{handler['GetLastError']}")
       return nil
@@ -161,8 +166,9 @@ class MetasploitModule < Msf::Post
       return
     end
 
-    if sysinfo['OS'] =~ /XP/
-      print_error('Windows XP is not supported')
+    version = get_version_info
+    if version.xp_or_2003?
+      print_error('Windows XP/Server 2003 is not supported')
       return
     end
 
@@ -179,12 +185,12 @@ class MetasploitModule < Msf::Post
       pub_ip = false
       print_status("Testing port #{dport}...")
       0.upto(datastore['HOPS'] - 1) do |i|
-        i = i + datastore['MIN_TTL']
+        i += datastore['MIN_TTL']
         h_icmp = icmp_setup
-        return if h_icmp.nil?
+        break if h_icmp.nil?
 
         h_tcp = tcp_setup(i)
-        return if h_tcp.nil?
+        break if h_tcp.nil?
 
         hop = connections(remote, dport, h_icmp, h_tcp, to)
         if hop.nil?

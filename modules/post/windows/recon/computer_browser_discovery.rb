@@ -30,6 +30,11 @@ class MetasploitModule < Msf::Post
               stdapi_railgun_memread
             ]
           }
+        },
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [],
+          'Reliability' => []
         }
       )
     )
@@ -48,29 +53,26 @@ class MetasploitModule < Msf::Post
     sys_list = []
     mem = client.railgun.memread(startmem, 24 * count)
 
-    count.times { |i|
+    count.times do |_i|
       x = {}
-      x[:platform_id] = mem[(base + 0), 4].unpack("V*")[0]
-      cnameptr = mem[(base + 4), 4].unpack("V*")[0]
-      x[:major_ver] = mem[(base + 8), 4].unpack("V*")[0]
-      x[:minor_ver] = mem[(base + 12), 4].unpack("V*")[0]
-      x[:type] = mem[(base + 16), 4].unpack("V*")[0]
-      commentptr = mem[(base + 20), 4].unpack("V*")[0]
+      x[:platform_id] = mem[(base + 0), 4].unpack('V*')[0]
+      cnameptr = mem[(base + 4), 4].unpack('V*')[0]
+      x[:major_ver] = mem[(base + 8), 4].unpack('V*')[0]
+      x[:minor_ver] = mem[(base + 12), 4].unpack('V*')[0]
+      x[:type] = mem[(base + 16), 4].unpack('V*')[0]
+      commentptr = mem[(base + 20), 4].unpack('V*')[0]
 
       x[:cname] = client.railgun.memread(cnameptr, 27).split("\0\0")[0].split("\0").join
       x[:comment] = client.railgun.memread(commentptr, 255).split("\0\0")[0].split("\0").join
       sys_list << x
-      base = base + 24
+      base += 24
       vprint_status("Identified: #{x[:cname]} - #{x[:comment]}")
-    }
+    end
     return sys_list
   end
 
   def run
-    ### MAIN ###
     client = session
-
-    domain = nil
 
     # Default = SV_TYPE_NT
     # Servers = SV_TYPE_ALL
@@ -82,40 +84,28 @@ class MetasploitModule < Msf::Post
     lookuptype = 1
 
     case datastore['LTYPE']
-    when 'WK' then lookuptype = "1".hex
-    when 'SVR' then lookuptype = "2".hex
-    when 'SQL' then lookuptype = "4".hex
-    when 'DC' then lookuptype = "8".hex
-    when 'DCBKUP' then lookuptype = "10".hex
-    when 'TIME' then lookuptype = "20".hex
-    when 'NOVELL' then lookuptype = "80".hex
-    when 'PRINTSVR' then lookuptype = "200".hex
-    when 'MASTERBROWSER' then lookuptype = "40000".hex
-    when 'WINDOWS' then lookuptype = "400000".hex
-    when 'UNIX' then lookuptype = "800".hex
-    when 'LOCAL' then lookuptype = "40000000".hex
-    end
-
-    if session.arch == ARCH_X64
-      nameiterator = 8
-      size = 64
-      addrinfoinmem = 32
-    else
-      nameiterator = 4
-      size = 32
-      addrinfoinmem = 24
+    when 'WK' then lookuptype = '1'.hex
+    when 'SVR' then lookuptype = '2'.hex
+    when 'SQL' then lookuptype = '4'.hex
+    when 'DC' then lookuptype = '8'.hex
+    when 'DCBKUP' then lookuptype = '10'.hex
+    when 'TIME' then lookuptype = '20'.hex
+    when 'NOVELL' then lookuptype = '80'.hex
+    when 'PRINTSVR' then lookuptype = '200'.hex
+    when 'MASTERBROWSER' then lookuptype = '40000'.hex
+    when 'WINDOWS' then lookuptype = '400000'.hex
+    when 'UNIX' then lookuptype = '800'.hex
+    when 'LOCAL' then lookuptype = '40000000'.hex
     end
 
     result = client.railgun.netapi32.NetServerEnum(nil, 101, 4, -1, 4, 4, lookuptype, datastore['DOMAIN'], 0)
 
     if result['totalentries'] == 0
-      print_error("No systems found of that type")
+      print_error('No systems found of that type')
       return
     end
     print_good("Found #{result['totalentries']} systems.")
 
-    endofline = 0
-    i = nameiterator
     netview = parse_netserverenum(result['bufptr'], result['totalentries'])
 
     ## get IP for host
@@ -124,19 +114,19 @@ class MetasploitModule < Msf::Post
         vprint_status("Looking up IP for #{x[:cname]}")
         print '.'
         result = client.net.resolve.resolve_host(x[:cname])
-        if result[:ip].nil? or result[:ip].blank?
+        if result[:ip].nil? || result[:ip].blank?
           print_error("There was an error resolving the IP for #{x[:cname]}")
           next
         else
           x[:ip] = result[:ip]
         end
       end
-    rescue ::Exception => e
+    rescue StandardError => e
       print_error(e)
       print_status('Windows 2000 and prior does not support getaddrinfo')
     end
 
-    netview = netview.sort_by { |e| e[:type] }
+    netview = netview.sort_by { |h| h[:type] }
 
     results = Rex::Text::Table.new(
       'Header' => 'Netdiscovery Results',
@@ -146,10 +136,10 @@ class MetasploitModule < Msf::Post
 
     netview.each do |x|
       results << [x[:type], x[:ip], x[:cname], "#{x[:major_ver]}.#{x[:minor_ver]}", x[:comment]]
-      report_host(:host => x[:ip]) if datastore['SAVEHOSTS'] and !(x[:ip].empty?)
+      report_host(host: x[:ip]) if datastore['SAVEHOSTS'] && !x[:ip].empty?
     end
     print_status(results.to_s)
-    store_loot("discovered.hosts", "text/plain", session, results.to_s, "discovered_hosts.txt", "Computer Browser Discovered Hosts")
+    store_loot('discovered.hosts', 'text/plain', session, results.to_s, 'discovered_hosts.txt', 'Computer Browser Discovered Hosts')
 
     print_status('If none of the IP addresses show up you are running this from a Win2k or older system')
     print_status("If a host doesn't have an IP it either timed out or only has an IPv6 address assinged to it")

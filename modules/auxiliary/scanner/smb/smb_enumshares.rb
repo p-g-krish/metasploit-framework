@@ -14,6 +14,8 @@ class MetasploitModule < Msf::Auxiliary
   include Msf::Auxiliary::Report
   include Msf::Auxiliary::Scanner
 
+  include Msf::OptionalSession::SMB
+
   def initialize(info = {})
     super(
       update_info(
@@ -38,6 +40,11 @@ class MetasploitModule < Msf::Auxiliary
         'License' => MSF_LICENSE,
         'DefaultOptions' => {
           'DCERPC::fake_bind_multi' => false
+        },
+        'Notes' => {
+          'Reliability' => UNKNOWN_RELIABILITY,
+          'Stability' => UNKNOWN_STABILITY,
+          'SideEffects' => UNKNOWN_SIDE_EFFECTS
         }
       )
     )
@@ -46,6 +53,8 @@ class MetasploitModule < Msf::Auxiliary
       [
         OptBool.new('SpiderShares', [false, 'Spider shares recursively', false]),
         OptBool.new('ShowFiles', [true, 'Show detailed information when spidering', false]),
+        OptString.new('Share', [ false, 'Show only the specified share']),
+        OptRegexp.new('HIGHLIGHT_NAME_PATTERN', [true, 'PCRE regex of resource names to highlight', 'username|password|user|pass|Groups.xml']),
         OptBool.new('SpiderProfiles', [false, 'Spider only user profiles when share is a disk share', true]),
         OptEnum.new('LogSpider', [false, '0 = disabled, 1 = CSV, 2 = table (txt), 3 = one liner (txt)', 3, [0, 1, 2, 3]]),
         OptInt.new('MaxDepth', [true, 'Max number of subdirectories to spider', 999]),
@@ -182,7 +191,11 @@ class MetasploitModule < Msf::Auxiliary
       begin
         tree = simple.client.tree_connect("\\\\#{ip}\\#{share_name}")
       rescue RubySMB::Error::UnexpectedStatusCode, RubySMB::Error::InvalidPacket => e
-        vprint_error("Error when trying to connect to share #{share_name} - #{e.status_code.name}")
+        if datastore['Share'].nil?
+          vprint_error("Error when trying to connect to share #{share_name} - #{e.status_code.name}")
+        else
+          print_error("Error when trying to connect to share #{share_name} - #{e.status_code.name}")
+        end
         print_status("Spidering #{share_name} complete") unless datastore['ShowFiles']
         next
       end
@@ -225,7 +238,12 @@ class MetasploitModule < Msf::Auxiliary
         pretty_tbl = Rex::Text::Table.new(
           'Header' => header,
           'Indent' => 1,
-          'Columns' => [ 'Type', 'Name', 'Created', 'Accessed', 'Written', 'Changed', 'Size' ]
+          'Columns' => [ 'Type', 'Name', 'Created', 'Accessed', 'Written', 'Changed', 'Size' ],
+          'ColProps' => {
+            'Name' => {
+              'Stylers' => [Msf::Ui::Console::TablePrint::HighlightSubstringStyler.new([datastore['HIGHLIGHT_NAME_PATTERN']])]
+            }
+          }
         )
 
         files.each do |file|
@@ -244,12 +262,14 @@ class MetasploitModule < Msf::Auxiliary
             sz = file.end_of_file
           end
 
+          # Logging of the obtained data.
+          logdata << "#{ip}\\#{share_name}#{subdirs.first}\\#{fname.encode}\n"
+          detailed_tbl << [ip.to_s, fa || 'Unknown', share_name, subdirs.first + '\\', fname, tcr, tac, twr, tch, sz]
+
           # Filename is too long for the UI table, cut it.
           fname = "#{fname[0, 35]}..." if fname.length > 35
 
           pretty_tbl << [fa || 'Unknown', fname, tcr, tac, twr, tch, sz]
-          detailed_tbl << [ip.to_s, fa || 'Unknown', share_name, subdirs.first + '\\', fname, tcr, tac, twr, tch, sz]
-          logdata << "#{ip}\\#{share_name}#{subdirs.first}\\#{fname.encode}\n"
         end
         print_good(pretty_tbl.to_s) if datastore['ShowFiles']
         subdirs.shift
@@ -272,57 +292,27 @@ class MetasploitModule < Msf::Auxiliary
   end
 
   def run_host(ip)
-    shares = []
-
-    [{ port: SMB1_PORT }, { port: SMB2_3_PORT } ].each do |info|
-      # Assign @rport so that it is accessible via the rport method in this module,
-      # as well as making it accessible to the module mixins
-      @rport = info[:port]
-
-      begin
-        print_status 'Starting module'
-        if rport == SMB1_PORT
-          connect(versions: [1])
-        else
-          connect(versions: [1, 2, 3])
-        end
+    if session
+      print_status("Using existing session #{session.sid}")
+      session.verify_connectivity
+      self.simple = session.simple_client
+      enum_shares(session.address)
+    else
+      [
+        { port: SMB1_PORT, versions: [1], backend: :ruby_smb, label: 'SMB over NetBIOS' },
+        { port: SMB2_3_PORT, versions: [1, 2, 3], backend: :ruby_smb, label: 'SMB' }
+      ].each do |info|
+        # Update line prefix, as port changes
+        remove_instance_variable(:@print_prefix) if instance_variable_defined?(:@print_prefix)
+        # Assign @rport so that it is accessible via the rport method in this module,
+        # as well as making it accessible to the module mixins
+        @rport = info[:port]
+        vprint_status("Connecting using #{info[:label]} via #{info[:backend]}")
+        connect(versions: info[:versions], backend: info[:backend])
         smb_login
-
-        begin
-          shares = simple.client.net_share_enum_all(ip)
-        rescue RubySMB::Error::UnexpectedStatusCode => e
-          print_error("Error when trying to enumerate shares - #{e.status_code.name}")
-          next
-        rescue RubySMB::Error::InvalidPacket => e
-          print_error("Invalid packet received when trying to enumerate shares - #{e}")
-          next
-        end
-
-        os_info = get_os_info(ip)
-        print_status(os_info) if os_info
-
-        if shares.empty?
-          print_status('No shares available')
-        else
-          shares.each do |share|
-            print_good("#{share[:name]} - (#{share[:type]}) #{share[:comment]}")
-          end
-
-          # Map RubySMB shares to the same data format as it was with Rex SMB
-          report_shares = shares.map { |share| [share[:name], share[:type], share[:comment]] }
-          report_note(
-            host: ip,
-            proto: 'tcp',
-            port: rport,
-            type: 'smb.shares',
-            data: { shares: report_shares },
-            update: :unique_data
-          )
-
-          if datastore['SpiderShares']
-            get_files_info(ip, shares)
-          end
-        end
+        shares = enum_shares(ip)
+        next if shares.nil? || shares.empty?
+        break
       rescue ::Interrupt
         raise $ERROR_INFO
       rescue Errno::ECONNRESET => e
@@ -333,23 +323,65 @@ class MetasploitModule < Msf::Auxiliary
         retry
       rescue Rex::ConnectionTimeout => e
         print_error(e.to_s)
-        return
       rescue Rex::Proto::SMB::Exceptions::LoginError => e
         print_error(e.to_s)
       rescue RubySMB::Error::RubySMBError => e
         print_error("RubySMB encountered an error: #{e}")
-        return
       rescue RuntimeError => e
         print_error e.to_s
-        return
       rescue StandardError => e
         vprint_error("Error: '#{ip}' '#{e.class}' '#{e}'")
       ensure
         disconnect
       end
-
-      # if we already got results, not need to try on another port
-      return unless shares.empty?
     end
+  end
+
+  def enum_shares(ip)
+    shares = []
+
+    begin
+      # Return all shares if `Shares` option has not been set
+      if datastore['Share'].nil?
+        shares = simple.client.net_share_enum_all(ip)
+      # Return specific share if the `Share` option has been set
+      else
+        simple.client.net_share_enum_all(ip).each { |share| shares = [share] if share[:name] == datastore['Share'] }
+      end
+      # Return an error if `Share` option has been set but no matches were found
+      print_error("No shares match #{datastore['Share']}") if shares.empty?
+    rescue RubySMB::Error::UnexpectedStatusCode => e
+      print_error("Error when trying to enumerate shares - #{e.status_code.name}")
+      return
+    rescue RubySMB::Error::InvalidPacket => e
+      vprint_error("Invalid packet received when trying to enumerate shares - #{e}")
+      return
+    end
+
+    os_info = get_os_info(ip)
+    print_status(os_info) if os_info
+
+    if shares.empty?
+      print_status('No shares available')
+    else
+      shares.each do |share|
+        print_good("#{share[:name]} - (#{share[:type]}) #{share[:comment]}")
+      end
+
+      # Map RubySMB shares to the same data format as it was with Rex SMB
+      report_shares = shares.map { |share| [share[:name], share[:type], share[:comment]] }
+      report_note(
+        host: ip,
+        proto: 'tcp',
+        port: rport,
+        type: 'smb.shares',
+        data: { shares: report_shares },
+        update: :unique_data
+      )
+
+      get_files_info(ip, shares) if datastore['SpiderShares']
+    end
+
+    shares
   end
 end

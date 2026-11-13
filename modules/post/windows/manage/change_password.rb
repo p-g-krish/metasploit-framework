@@ -9,7 +9,7 @@ class MetasploitModule < Msf::Post
     super(
       update_info(
         info,
-        'Name' => "Windows Manage Change Password",
+        'Name' => 'Windows Manage Change Password',
         'Description' => %q{
           This module will attempt to change the password of the targeted account.
           The typical usage is to change a newly created account's password on a
@@ -27,14 +27,19 @@ class MetasploitModule < Msf::Post
               stdapi_railgun_api
             ]
           }
+        },
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [CONFIG_CHANGES],
+          'Reliability' => []
         }
       )
     )
 
     register_options(
       [
-        OptString.new('SMBDomain', [false, 'Domain or Host to change password on, if not set will use the current login domain', nil]),
-        OptString.new('SMBUser', [true, 'Username to change password of']),
+        OptString.new('SMBDomain', [false, 'Domain or Host to change password on, if not set will use the current login domain', nil], fallbacks: ['DOMAIN']),
+        OptString.new('SMBUser', [true, 'Username to change password of'], fallbacks: ['PASSWORD']),
         OptString.new('OLD_PASSWORD', [true, 'Original password' ]),
         OptString.new('NEW_PASSWORD', [true, 'New password' ]),
       ]

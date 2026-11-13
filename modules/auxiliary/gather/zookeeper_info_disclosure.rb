@@ -24,9 +24,14 @@ class MetasploitModule < Msf::Auxiliary
         ],
         'DisclosureDate' => '2020-10-14',
         'License' => MSF_LICENSE,
-        'DefaultOptions' => { 'VERBOSE' => true }
+        'DefaultOptions' => { 'VERBOSE' => true },
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [],
+          'Reliability' => []
+        }
       )
-      )
+    )
 
     register_options(
       [
@@ -115,7 +120,7 @@ class MetasploitModule < Msf::Auxiliary
         end
       end
     rescue Timeout::Error, ::Rex::TimeoutError, ::Rex::ConnectionRefused, ::Rex::HostUnreachable, ::Rex::ConnectionTimeout, ::Rex::ConnectionError
-      print_error("#{rhost}:#{rport} - Connection Failed...")
+      print_error("#{Rex::Socket.to_authority(rhost, rport)} - Connection Failed...")
     ensure
       disconnect
     end

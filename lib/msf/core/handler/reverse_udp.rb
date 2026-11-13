@@ -19,6 +19,7 @@ module ReverseUdp
 
   include Msf::Handler
   include Msf::Handler::Reverse::Comm
+  include Msf::Handler::Reverse::Bind
 
   #
   # Returns the string representation of the handler type, in this case
@@ -77,7 +78,7 @@ module ReverseUdp
 
     register_options(
       [
-        Opt::LHOST,
+        Msf::OptAddressOrHostname.new('LHOST', [true, 'The listen address (an interface may be specified)']),
         Opt::LPORT(4444)
       ], Msf::Handler::ReverseUdp)
 
@@ -105,7 +106,7 @@ module ReverseUdp
 
     comm = select_comm
     local_port = bind_port
-    addrs = bind_address
+    addrs = bind_addresses
 
     addrs.each { |ip|
       begin
@@ -159,7 +160,8 @@ module ReverseUdp
       loop do
         # Accept a client connection
         begin
-          inbound, peerhost, peerport = self.listener_sock.recvfrom
+          inbound, addr = self.listener_sock.recvfrom(65535)
+          peerhost, peerport = addr[3], addr[1]
           next if peerhost.nil?
           comm = self.listener_sock.channel.client if self.listener_sock.respond_to?(:channel) && self.listener_sock.channel.respond_to?(:client)
 
@@ -252,26 +254,6 @@ protected
   def bind_port
     port = datastore['ReverseListenerBindPort'].to_i
     port > 0 ? port : datastore['LPORT'].to_i
-  end
-
-  def bind_address
-    # Switch to IPv6 ANY address if the LHOST is also IPv6
-    addr = Rex::Socket.resolv_nbo(datastore['LHOST'])
-    # First attempt to bind LHOST. If that fails, the user probably has
-    # something else listening on that interface. Try again with ANY_ADDR.
-    any = (addr.length == 4) ? "0.0.0.0" : "::0"
-
-    addrs = [ Rex::Socket.addr_ntoa(addr), any  ]
-
-    if not datastore['ReverseListenerBindAddress'].to_s.empty?
-      # Only try to bind to this specific interface
-      addrs = [ datastore['ReverseListenerBindAddress'] ]
-
-      # Pick the right "any" address if either wildcard is used
-      addrs[0] = any if (addrs[0] == "0.0.0.0" or addrs == "::0")
-    end
-
-    addrs
   end
 
   attr_accessor :listener_sock # :nodoc:

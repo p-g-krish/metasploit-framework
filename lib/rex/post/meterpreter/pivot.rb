@@ -17,7 +17,7 @@ class PivotListener
   attr_accessor :stage
 
   def initialize(session_class, url, stage)
-    self.id = [SecureRandom.uuid.gsub(/-/, '')].pack('H*')
+    self.id = [SecureRandom.uuid.gsub('-', '')].pack('H*')
     self.session_class = session_class
     self.url = url
     self.stage = stage
@@ -89,6 +89,7 @@ class Pivot
     # TODO: add more platforms
     case opts[:platform]
     when 'windows'
+      c.include(::Msf::Sessions::MeterpreterOptions::Windows) # Moved to be platform-specific
       # Include the appropriate reflective dll injection module for the target process architecture...
       if opts[:arch] == ARCH_X86
         c.include(::Msf::Payload::Windows::MeterpreterLoader)

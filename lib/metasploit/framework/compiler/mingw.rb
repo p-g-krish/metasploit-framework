@@ -7,7 +7,6 @@ module Metasploit
         MINGW_X64 = 'x86_64-w64-mingw32-gcc'
 
         INCLUDE_DIR = File.join(Msf::Config.data_directory, 'headers', 'windows', 'c_payload_util')
-        UTILITY_DIR = File.join(Msf::Config.data_directory, 'utilities', 'encrypted_payload')
         OPTIMIZATION_FLAGS = [ 'Os', 'O0', 'O1', 'O2', 'O3', 'Og' ]
 
         def compile_c(src)
@@ -34,6 +33,7 @@ module Metasploit
 
           cmd << "#{self.mingw_bin} "
           cmd << "#{src_file} -I #{INCLUDE_DIR} "
+          cmd << "#{self.include_dirs.map { |include_dir| "-iquote #{include_dir}" }.join(' ')} " if self.include_dirs.any?
           cmd << "-o #{exe_file} "
 
           # gives each function its own section
@@ -77,7 +77,7 @@ module Metasploit
         class X86
           include Mingw
 
-          attr_reader :file_name, :keep_exe, :keep_src, :strip_syms, :link_script, :opt_lvl, :mingw_bin, :compile_options, :show_compile_cmd
+          attr_reader :file_name, :keep_exe, :keep_src, :strip_syms, :link_script, :opt_lvl, :mingw_bin, :compile_options, :show_compile_cmd, :include_dirs
 
           def initialize(opts={})
             @file_name = opts[:f_name]
@@ -88,6 +88,7 @@ module Metasploit
             @link_script = opts[:linker_script]
             @compile_options = opts[:compile_options]
             @opt_lvl = opts[:opt_lvl]
+            @include_dirs = opts[:include_dirs] || []
             @mingw_bin = MINGW_X86
           end
 
@@ -99,7 +100,7 @@ module Metasploit
         class X64
           include Mingw
 
-          attr_reader :file_name, :keep_exe, :keep_src, :strip_syms, :link_script, :opt_lvl, :mingw_bin, :compile_options, :show_compile_cmd
+          attr_reader :file_name, :keep_exe, :keep_src, :strip_syms, :link_script, :opt_lvl, :mingw_bin, :compile_options, :show_compile_cmd, :include_dirs
 
           def initialize(opts={})
             @file_name = opts[:f_name]
@@ -110,6 +111,7 @@ module Metasploit
             @link_script = opts[:linker_script]
             @compile_options = opts[:compile_options]
             @opt_lvl = opts[:opt_lvl]
+            @include_dirs = opts[:include_dirs] || []
             @mingw_bin = MINGW_X64
           end
 

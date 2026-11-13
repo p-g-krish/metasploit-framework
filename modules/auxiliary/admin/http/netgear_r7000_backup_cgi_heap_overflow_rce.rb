@@ -27,7 +27,7 @@ class MetasploitModule < Msf::Auxiliary
         'Platform' => 'linux',
         'Author' => [
           'colorlight2019', # Vulnerability Discovery and Exploit Code
-          'SSD Disclosure', # Vulnerabilty Writeup
+          'SSD Disclosure', # Vulnerability Writeup
           'Grant Willcox (tekwizz123)' # Metasploit Module
         ],
         'DefaultTarget' => 0,
@@ -102,13 +102,13 @@ class MetasploitModule < Msf::Auxiliary
       model = scrape(data, marker_one, marker_two)
       print_status("Router is a NETGEAR router (#{model})")
       if model == 'R7000' && check_vuln_firmware
-        return Exploit::CheckCode::Vulnerable
+        return Exploit::CheckCode::Vulnerable('NETGEAR R7000 with vulnerable firmware')
       end
 
     else
       print_error('Router is not a NETGEAR router')
     end
-    return Exploit::CheckCode::Safe
+    return Exploit::CheckCode::Safe('Target does not appear to be a vulnerable NETGEAR router')
   end
 
   def fake_logins_to_ease_heap

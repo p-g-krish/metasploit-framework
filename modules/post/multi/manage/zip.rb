@@ -28,6 +28,11 @@ class MetasploitModule < Msf::Post
               stdapi_sys_config_steal_token
             ]
           }
+        },
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [],
+          'Reliability' => []
         }
       )
     )
@@ -49,10 +54,10 @@ class MetasploitModule < Msf::Post
   end
 
   def wsh_script(dst, src)
-    script_file = File.read(File.join(Msf::Config.data_directory, "post", "zip", "zip.js"))
-    src.gsub!("\\", "\\\\\\")
-    dst.gsub!("\\", "\\\\\\")
-    script_file << "zip(\"#{src}\",\"#{dst}\");".force_encoding("UTF-8")
+    script_file = File.read(File.join(Msf::Config.data_directory, 'post', 'zip', 'zip.js'))
+    src.gsub!('\\', '\\\\\\')
+    dst.gsub!('\\', '\\\\\\')
+    script_file << "zip(\"#{src}\",\"#{dst}\");".force_encoding('UTF-8')
     script_file
   end
 
@@ -101,7 +106,7 @@ class MetasploitModule < Msf::Post
     script = wsh_script(datastore['DESTINATION'], datastore['SOURCE'])
     tmp_path = "#{get_env('TEMP')}\\zip.js"
     print_status("script file uploaded to #{tmp_path}")
-    write_file(tmp_path, script.encode("UTF-16LE"))
+    write_file(tmp_path, script.encode('UTF-16LE'))
     cmd_exec("cscript.exe #{tmp_path}")
   end
 

@@ -41,7 +41,7 @@ class MetasploitModule < Msf::Auxiliary
       ]
     )
 
-    deregister_options('PASSWORD_SPRAY', 'VHOST', 'USER_AS_PASS',
+    deregister_options('VHOST', 'USER_AS_PASS',
                        'USERPASS_FILE', 'STOP_ON_SUCCESS', 'Proxies',
                        'DB_ALL_CREDS', 'DB_ALL_PASS', 'DB_ALL_USERS',
                        'BLANK_PASSWORDS', 'RHOSTS')
@@ -159,10 +159,13 @@ class MetasploitModule < Msf::Auxiliary
     elsif auth_details.start_with?('AADSTS50034') # User does not exist
       print_error("#{domain}\\#{username} is not a valid user")
     elsif auth_details.start_with?('AADSTS50053') # Account is locked
-      print_error('Account is locked, consider taking time before continuuing to scan!')
+      print_error("#{domain}\\#{username} is locked, consider taking time before continuing to scan!")
+      :next_user
+    elsif auth_details.start_with?('AADSTS50057') # User exists, but is disabled so we don't report
+      print_error("#{domain}\\#{username} exists but is disabled; it will not be reported")
       :next_user
     else # Unknown error code
-      print_error("Received unknown response with error code: #{auth_details}")
+      print_error("Received unknown response for #{domain}\\#{username}:#{password} with error code: #{auth_details}")
     end
   end
 

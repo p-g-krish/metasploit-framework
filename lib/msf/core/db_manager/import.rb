@@ -10,8 +10,6 @@ require 'uri'
 # Gems
 #
 
-require 'packetfu'
-
 module Msf::DBManager::Import
   autoload :Acunetix, 'msf/core/db_manager/import/acunetix'
   autoload :Amap, 'msf/core/db_manager/import/amap'
@@ -32,6 +30,7 @@ module Msf::DBManager::Import
   autoload :Nexpose, 'msf/core/db_manager/import/nexpose'
   autoload :Nikto, 'msf/core/db_manager/import/nikto'
   autoload :Nmap, 'msf/core/db_manager/import/nmap'
+  autoload :Nuclei, 'msf/core/db_manager/import/nuclei'
   autoload :OpenVAS, 'msf/core/db_manager/import/open_vas'
   autoload :Outpost24, 'msf/core/db_manager/import/outpost24'
   autoload :Qualys, 'msf/core/db_manager/import/qualys'
@@ -59,6 +58,7 @@ module Msf::DBManager::Import
   include Msf::DBManager::Import::Nexpose
   include Msf::DBManager::Import::Nikto
   include Msf::DBManager::Import::Nmap
+  include Msf::DBManager::Import::Nuclei
   include Msf::DBManager::Import::OpenVAS
   include Msf::DBManager::Import::Outpost24
   include Msf::DBManager::Import::Qualys
@@ -353,6 +353,12 @@ module Msf::DBManager::Import
     elsif (firstline.index("<NessusClientData>"))
       @import_filedata[:type] = "Nessus XML (v1)"
       return :nessus_xml
+    elsif firstline.starts_with?('{"template":')
+      @import_filedata[:type] = "Nuclei JSONL"
+      return :nuclei_jsonl
+    elsif firstline.starts_with?('[{"template":')
+      @import_filedata[:type] = "Nuclei JSON"
+      return :nuclei_json
     elsif (firstline.index("<SecScan ID="))
       @import_filedata[:type] = "Microsoft Baseline Security Analyzer"
       return :mbsa_xml
@@ -472,23 +478,84 @@ module Msf::DBManager::Import
     raise Msf::DBImportError.new("Could not automatically determine file type")
   end
 
-  # Handles timestamps from Metasploit Express/Pro imports.
-  def msf_import_timestamps(opts,obj)
+  def msf_import_service(opts)
+    normalised_import_timestamp_opts = msf_normalise_import_timestamps(opts)
+    report_service(normalised_import_timestamp_opts)
+  end
+
+  def msf_import_vuln(opts)
+    normalised_import_timestamp_opts = msf_normalise_import_timestamps(opts)
+    report_vuln(normalised_import_timestamp_opts)
+  end
+
+  def msf_import_note(opts)
+    normalised_import_timestamp_opts = msf_normalise_import_timestamps(opts)
+    report_note(normalised_import_timestamp_opts)
+  end
+
+  def msf_import_host(opts)
+    normalised_import_timestamp_opts = msf_normalise_import_timestamps(opts)
+    report_host(normalised_import_timestamp_opts)
+  end
+
+  def msf_import_task(opts)
+    normalised_import_timestamp_opts = msf_normalise_import_timestamps(opts)
+    report_task(normalised_import_timestamp_opts)
+  end
+
+  def msf_import_user(opts)
+    normalised_import_timestamp_opts = msf_normalise_import_timestamps(opts)
+    report_user(normalised_import_timestamp_opts)
+  end
+
+  def msf_import_loot(opts)
+    normalised_import_timestamp_opts = msf_normalise_import_timestamps(opts)
+    report_loot(normalised_import_timestamp_opts)
+  end
+
+  def msf_import_web_site(opts)
+    normalised_import_timestamp_opts = msf_normalise_import_timestamps(opts)
+    report_web_site(normalised_import_timestamp_opts)
+  end
+
+  def msf_import_web_page(opts)
+    normalised_import_timestamp_opts = msf_normalise_import_timestamps(opts)
+    report_web_page(normalised_import_timestamp_opts)
+  end
+
+  def msf_import_web_vuln(opts)
+    normalised_import_timestamp_opts = msf_normalise_import_timestamps(opts)
+    report_web_vuln(normalised_import_timestamp_opts)
+  end
+
+  def msf_import_artifact(opts)
+    normalised_import_timestamp_opts = msf_normalise_import_timestamps(opts)
+    report_artifact(normalised_import_timestamp_opts)
+  end
+
+  # Assigns created_at and updated_at time stamps to an object.
+  def msf_assign_timestamps(opts,obj)
     obj.created_at = opts["created_at"] if opts["created_at"]
     obj.created_at = opts[:created_at] if opts[:created_at]
-    obj.updated_at = opts["updated_at"] ? opts["updated_at"] : obj.created_at
-    obj.updated_at = opts[:updated_at] ? opts[:updated_at] : obj.created_at
-    return obj
+    obj.updated_at = opts["updated_at"] if opts["updated_at"]
+    obj.updated_at = opts[:updated_at] if opts[:updated_at]
+  end
+
+  # Handles timestamps from Metasploit Express/Pro imports.
+  def msf_normalise_import_timestamps(opts)
+    opts[:created_at] ||= (opts["created_at"] || ::Time.now.utc)
+    opts[:updated_at] ||= (opts["updated_at"] || opts[:created_at])
+    opts
   end
 
   def report_import_note(wspace,addr)
     if @import_filedata.kind_of?(Hash) && @import_filedata[:filename] && @import_filedata[:filename] !~ /msfe-nmap[0-9]{8}/
-    report_note(
-      :workspace => wspace,
-      :host => addr,
-      :type => 'host.imported',
-      :data => @import_filedata.merge(:time=> Time.now.utc)
-    )
+      msf_import_note(
+        :workspace => wspace,
+        :host => addr,
+        :type => 'host.imported',
+        :data => @import_filedata.merge(:time=> Time.now.utc)
+      )
     end
   end
 

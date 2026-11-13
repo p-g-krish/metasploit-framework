@@ -101,6 +101,7 @@ module Msf
         all_information = preamble
         all_information << datastore(framework, driver)
         all_information << database_configuration(framework)
+        all_information << framework_config(framework)
         all_information << history(driver)
         all_information << errors
         all_information << logs
@@ -122,11 +123,11 @@ module Msf
         end
 
         # Retrieve and add more up to date information
-        add_hash_to_ini_group(ini, framework.datastore, driver.get_config_core)
+        add_hash_to_ini_group(ini, framework.datastore.to_h, driver.get_config_core)
         add_hash_to_ini_group(ini, driver.get_config, driver.get_config_group)
 
         if driver.active_module
-          add_hash_to_ini_group(ini, driver.active_module.datastore.dup, driver.active_module.refname)
+          add_hash_to_ini_group(ini, driver.active_module.datastore.to_h, driver.active_module.refname)
         end
 
         # Filter credentials
@@ -163,22 +164,22 @@ module Msf
           example_workspaces = ::Mdm::Workspace.order(id: :desc).take(10)
           ordered_workspaces = ([current_workspace] + example_workspaces).uniq.sort_by(&:id)
           workspace_rows = ordered_workspaces.map do |workspace|
-            id = current_workspace.id == workspace.id ? "#{workspace.id.to_s(:delimited)} **(Current)**" : workspace.id.to_s(:delimited)
+            id = current_workspace.id == workspace.id ? "#{workspace.id.to_fs(:delimited)} **(Current)**" : workspace.id.to_fs(:delimited)
             [
               id,
-              workspace.hosts.count.to_s(:delimited),
-              workspace.vulns.count.to_s(:delimited),
-              workspace.notes.count.to_s(:delimited),
-              workspace.services.count.to_s(:delimited)
+              workspace.hosts.count.to_fs(:delimited),
+              workspace.vulns.count.to_fs(:delimited),
+              workspace.notes.count.to_fs(:delimited),
+              workspace.services.count.to_fs(:delimited)
             ]
           end
 
           totals_row = [
-            "**Total (#{::Mdm::Workspace.count.to_s(:delimited)})**",
-            "**#{::Mdm::Host.count.to_s(:delimited)}**",
-            "**#{::Mdm::Vuln.count.to_s(:delimited)}**",
-            "**#{::Mdm::Note.count.to_s(:delimited)}**",
-            "**#{::Mdm::Service.count.to_s(:delimited)}**"
+            "**Total (#{::Mdm::Workspace.count.to_fs(:delimited)})**",
+            "**#{::Mdm::Host.count.to_fs(:delimited)}**",
+            "**#{::Mdm::Vuln.count.to_fs(:delimited)}**",
+            "**#{::Mdm::Note.count.to_fs(:delimited)}**",
+            "**#{::Mdm::Service.count.to_fs(:delimited)}**"
           ]
 
           table = "| ID | Hosts | Vulnerabilities | Notes | Services |\n"
@@ -198,6 +199,23 @@ module Msf
           'Database Configuration',
           ERROR_BLURB,
           section_build_error('Failed to extract Database configuration', e)
+        )
+      end
+
+      def self.framework_config(framework)
+        required_features = framework.features.all.map { |feature| [feature[:name], feature[:enabled].to_s] }
+        markdown_formatted_features = required_features.map { |feature| "| #{feature.join(' | ')} |" }
+        required_fields = %w[name enabled]
+
+        table = "| #{required_fields.join(' | ')} |\n"
+        table += '|' + '-:|' * required_fields.count + "\n"
+        table += markdown_formatted_features.join("\n").to_s
+
+        # The markdown table can't be placed in a code block or it will not render as a table.
+        build_section_no_block(
+          'Framework Configuration',
+          'The features are configured as follows:',
+          table
         )
       end
 
@@ -258,6 +276,7 @@ module Msf
         str = <<~VERSIONS
           Framework: #{framework.version}
           Ruby: #{RUBY_DESCRIPTION}
+          OpenSSL: #{OpenSSL::OPENSSL_VERSION}
           Install Root: #{Msf::Config.install_root}
           Session Type: #{db_connection_info(framework)}
           Install Method: #{installation_method}

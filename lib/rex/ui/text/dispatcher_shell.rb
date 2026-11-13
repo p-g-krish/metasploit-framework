@@ -232,6 +232,7 @@ module DispatcherShell
     #
     # Return a pretty, user-readable table of commands provided by this
     # dispatcher.
+    # The command column width can be modified by passing in :command_width.
     #
     def help_to_s(opts={})
       # If this dispatcher has no commands, we can't do anything useful.
@@ -250,7 +251,7 @@ module DispatcherShell
           {
             'Command' =>
               {
-                'MaxWidth' => 12
+                'Width' => opts[:command_width]
               }
           })
 
@@ -297,8 +298,26 @@ module DispatcherShell
     # Return a list of possible directory for tab completion.
     #
     def tab_complete_directory(str, words)
-      str = '.' + ::File::SEPARATOR if str.empty?
-      dirs = Dir.glob(str.concat('*'), File::FNM_CASEFOLD).select { |x| File.directory?(x) }
+      directory = str[-1] == File::SEPARATOR ? str : File.dirname(str)
+      filename = str[-1] == File::SEPARATOR ? '' : File.basename(str)
+      entries = Dir.entries(directory).select { |fp| fp.start_with?(filename) }
+      dirs = entries - ['.', '..']
+      dirs = dirs.map { |fp| File.join(directory, fp).gsub(/\A\.\//, '') }
+      dirs = dirs.select { |x| File.directory?(x) }
+      dirs = dirs.map { |x| x + File::SEPARATOR }
+      if dirs.length == 1 && dirs[0] != str && dirs[0].end_with?(File::SEPARATOR)
+        # If Readline receives a single value from this function, it will assume we're done with the tab
+        # completing, and add an extra space at the end.
+        # This is annoying if we're recursively tab-traversing our way through subdirectories -
+        # we may want to continue traversing, but MSF will add a space, requiring us to back up to continue
+        # tab-completing our way through successive subdirectories.
+        ::Readline.completion_append_character = nil
+      end
+
+      if dirs.length == 0 && File.directory?(str)
+        # we've hit the end of the road
+        dirs = [str]
+      end
 
       dirs
     end
@@ -375,7 +394,7 @@ module DispatcherShell
   def initialize(prompt, prompt_char = '>', histfile = nil, framework = nil, name = nil)
     super
 
-    # Initialze the dispatcher array
+    # Initialize the dispatcher array
     self.dispatcher_stack = []
 
     # Initialize the tab completion array
@@ -570,7 +589,15 @@ module DispatcherShell
   # If the command is unknown...
   #
   def unknown_command(method, line)
-    print_error("Unknown command: #{method}")
+    # Map each dispatchers commands to valid_commands
+    valid_commands = dispatcher_stack.flat_map { |dispatcher| dispatcher.commands.keys }
+
+    message = "Unknown command: #{method}."
+    suggestion = DidYouMean::SpellChecker.new(dictionary: valid_commands).correct(method).first
+    message << " Did you mean %grn#{suggestion}%clr?" if suggestion
+    message << ' Run the %grnhelp%clr command for more details.'
+
+    print_error(message)
   end
 
   #
@@ -628,13 +655,15 @@ module DispatcherShell
   # See +CommandDispatcher#help_to_s+
   #
   def help_to_s(opts = {})
-    str = ''
+    str = +''
+
+    max_command_length = dispatcher_stack.flat_map { |dispatcher| dispatcher.commands.to_a }.map { |(name, _description)| name.length }.max
 
     dispatcher_stack.reverse.each { |dispatcher|
-      str << dispatcher.help_to_s
+      str << dispatcher.help_to_s(opts.merge({ command_width: [max_command_length, 12].max }))
     }
 
-    return str
+    return str << "For more info on a specific command, use %grn<command> -h%clr or %grnhelp <command>%clr.\n\n"
   end
 
 

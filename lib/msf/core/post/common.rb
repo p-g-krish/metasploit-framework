@@ -22,28 +22,110 @@ module Msf::Post::Common
     Gem.win_platform? ? (system "cls") : (system "clear")
   end
 
-  def rhost
-    return nil unless session
+  def with_meterpreter_response_timeout(time_out)
+    previous_response_timeout = session.response_timeout
+    session.response_timeout = time_out
+    yield
+  ensure
+    session.response_timeout = previous_response_timeout if defined?(previous_response_timeout)
+  end
+  private :with_meterpreter_response_timeout
 
-    case session.type
+  def rhost
+    return super unless defined?(session) and session
+
+    case session.type.downcase
     when 'meterpreter'
       session.sock.peerhost
     when 'shell', 'powershell'
       session.session_host
     end
+  rescue
+    return nil
   end
 
   def rport
-    case session.type
+    return super unless defined?(session) and session
+
+    case session.type.downcase
     when 'meterpreter'
       session.sock.peerport
     when 'shell', 'powershell'
       session.session_port
     end
+  rescue
+    return nil
   end
 
   def peer
     "#{rhost}:#{rport}"
+  end
+
+  # Create a new process, receiving the program's output
+  # @param executable [String] The path to the executable; either absolute or relative to the session's current directory
+  # @param args [Array<String>] The arguments to the executable
+  # @param time_out [Integer] Number of seconds before the call will time out
+  # @param opts [Hash] Optional settings to parameterise the process launch
+  # @option Hidden [Boolean] Is the process launched without creating a visible window
+  # @option Channelized [Boolean] The process is launched with pipes connected to a channel, e.g. for sending input/receiving output
+  # @option Suspended [Boolean] Start the process suspended
+  # @option UseThreadToken [Boolean] Use the thread token (as opposed to the process token) to launch the process
+  # @option Desktop [Boolean] Run on meterpreter's current desktop
+  # @option Session [Integer] Execute process in a given session as the session user
+  # @option Subshell [Boolean] Execute process in a subshell
+  # @option Pty [Boolean] Execute process in a pty (if available)
+  # @option ParentId [Integer] Spoof the parent PID (if possible)
+  # @option InMemory [Boolean,String] Execute from memory (`path` is treated as a local file to upload, and the actual path passed
+  #                                   to meterpreter is this parameter's value, if provided as a String)
+  def create_process(executable, args: [], time_out: 15, opts: {})
+    case session.type
+    when 'meterpreter'
+      o = with_meterpreter_response_timeout(time_out) do
+        opts = {
+          'Hidden' => true,
+          'Channelized' => true,
+          # Well-behaving meterpreters will ignore the Subshell flag when using arg arrays.
+          # This is still provided for supporting old meterpreters.
+          'Subshell' => true
+        }.merge(opts)
+
+        if session.platform == 'windows'
+          if session.arch == 'php'
+            opts[:legacy_args] = Msf::Sessions::CommandShellWindows.to_cmd(args)
+            opts[:legacy_path] = Msf::Sessions::CommandShellWindows.to_cmd([executable])
+          elsif session.arch == 'python'
+            opts[:legacy_path] = executable
+            # Yes, Unix. Old Python meterp had a bug where it used posix shell splitting
+            # syntax even on Windows. For backwards-compatibility, we can trick it into
+            # doing the right thing by using Unix escaping.
+            opts[:legacy_args] = Msf::Sessions::CommandShellUnix.to_cmd(args)
+          else
+            opts[:legacy_args] = Msf::Sessions::CommandShellWindows.argv_to_commandline(args)
+            opts[:legacy_path] = Msf::Sessions::CommandShellWindows.escape_cmd(executable)
+          end
+        else
+          opts[:legacy_args] = Msf::Sessions::CommandShellUnix.to_cmd(args)
+          opts[:legacy_path] = Msf::Sessions::CommandShellUnix.to_cmd([executable])
+        end
+
+        if opts['Channelized']
+          session.sys.process.capture_output(executable, args, opts, time_out)
+        else
+          session.sys.process.execute(executable, args, opts)
+          nil
+        end
+      end
+    when 'powershell'
+      cmd = session.to_cmd([executable] + args)
+      o = session.shell_command(cmd, time_out)
+      o.chomp! if o
+    when 'shell'
+      cmd = session.to_cmd([executable] + args)
+      o = session.shell_command_token(cmd, time_out)
+      o.chomp! if o
+    end
+    return "" if o.nil?
+    return o
   end
 
   #
@@ -102,13 +184,20 @@ module Msf::Post::Common
         args = ""
       end
 
-      session.response_timeout = time_out
-      opts = {
-        'Hidden' => true,
-        'Channelized' => true,
-        'Subshell' => true
-      }.merge(opts)
-      o = session.sys.process.capture_output(cmd, args, opts, time_out)
+      o = with_meterpreter_response_timeout(time_out) do
+        opts = {
+          'Hidden' => true,
+          'Channelized' => true,
+          'Subshell' => true
+        }.merge(opts)
+
+        if opts['Channelized']
+          session.sys.process.capture_output(cmd, args, opts, time_out)
+        else
+          session.sys.process.execute(cmd, args, opts)
+          nil
+        end
+      end
     when 'powershell'
       if args.nil? || args.empty?
         o = session.shell_command("#{cmd}", time_out)
@@ -134,12 +223,13 @@ module Msf::Post::Common
         if args.nil? and cmd =~ /[^a-zA-Z0-9\/._-]/
           args = ""
         end
-        session.response_timeout = time_out
-        process = session.sys.process.execute(cmd, args, {'Hidden' => true, 'Channelized' => true, 'Subshell' => true })
-        process.channel.close
-        pid = process.pid
-        process.close
-        pid
+        with_meterpreter_response_timeout(time_out) do
+          process = session.sys.process.execute(cmd, args, {'Hidden' => true, 'Channelized' => true, 'Subshell' => true })
+          process.channel.close
+          pid = process.pid
+          process.close
+          pid
+        end
       else
         print_error "cmd_exec_get_pid is incompatible with non-meterpreter sessions"
     end
@@ -236,5 +326,52 @@ module Msf::Post::Common
     raise "Unable to check if command `#{cmd}' exists"
   end
 
+  # Executes +cmd+ on the remote system and return an array containing the
+  # output and if it was successful or not.
+  #
+  # This is simply a wrapper around {#cmd_exec} that also checks the exit code
+  # to determine if the execution was successful or not.
+  #
+  # @param [String] cmd The command to execute
+  # @param args [String] The optional arguments of the command (can de included in +cmd+ instead)
+  # @param [Integer] timeout The time in sec. to wait before giving up
+  # @param [Hash] opts An Hash of options (see {#cmd_exec})
+  # @return [Array(String, Boolean)] Array containing the output string
+  #   followed by a boolean indicating if the command succeeded or not. When
+  #   this boolean is `true`, the first field contains the normal command
+  #   output. When it is `false`, the first field contains the error message
+  #   returned by the command or a timeout error message if the timeout
+  #   expired.
+  def cmd_exec_with_result(cmd, args = nil, timeout = 15, opts = {})
+    # This token will be returned if the command succeeds.
+    # Redirection operators (`&&` and `||`) are the most reliable methods to
+    # detect success and failure. See these references for details:
+    # - https://ss64.com/nt/errorlevel.html
+    # - https://stackoverflow.com/questions/34936240/batch-goto-loses-errorlevel/34937706#34937706
+    # - https://stackoverflow.com/questions/10935693/foolproof-way-to-check-for-nonzero-error-return-code-in-windows-batch-file/10936093#10936093
+    verification_token = Rex::Text.rand_text_alphanumeric(8)
+
+    _cmd = cmd.dup
+    _cmd << " #{args}" if args
+    if session.platform == 'windows'
+      if session.type == 'powershell'
+        # The & operator is reserved by Powershell and needs to be wrapped in double quotes
+        result = cmd_exec('cmd', "/c #{_cmd} \"&&\" echo #{verification_token}", timeout, opts)
+      else
+        result = cmd_exec('cmd', "/c #{_cmd} && echo #{verification_token}", timeout, opts)
+      end
+    else
+      result = cmd_exec('command', "#{_cmd} && echo #{verification_token}", timeout, opts)
+    end
+
+    if result.include?(verification_token)
+      # Removing the verification token to cleanup the output string
+      [result.lines[0...-1].join.strip, true]
+    else
+      [result.strip, false]
+    end
+  rescue Rex::TimeoutError => e
+    [e.message, false]
+  end
 
 end
